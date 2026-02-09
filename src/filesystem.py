@@ -126,6 +126,39 @@ class FileSystem:
             logger.debug(f"Wrote data for agent {agent_name} to {file_path}")
         except Exception as e:
             raise FileSystemError(f"Failed to write data for {agent_name}: {e}")
+
+    def create_query_file(self, agent_name: str, ticks: int, query_timestamp: str, payload: Dict[str, Any]) -> str:
+        """
+        Create a per-query file named {agent_name}_{ticks}.txt and write the query timestamp and payload.
+
+        Returns the full path to the created file.
+        """
+        try:
+            file_path = os.path.join(self.working_dir, f"{agent_name}_{ticks}.txt")
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(f"QUERY_TIMESTAMP: {query_timestamp}\n")
+                f.write("PAYLOAD:\n")
+                json.dump(payload, f, indent=2)
+                f.write("\n\n")
+            logger.debug(f"Created query file for {agent_name}: {file_path}")
+            return file_path
+        except Exception as e:
+            raise FileSystemError(f"Failed to create query file for {agent_name}: {e}")
+
+    def append_response_file(self, agent_name: str, ticks: int, response_timestamp: str, response: str) -> None:
+        """
+        Append response timestamp and response content to the per-query file {agent_name}_{ticks}.txt.
+        """
+        try:
+            file_path = os.path.join(self.working_dir, f"{agent_name}_{ticks}.txt")
+            with open(file_path, 'a', encoding='utf-8') as f:
+                f.write(f"RESPONSE_TIMESTAMP: {response_timestamp}\n")
+                f.write("RESPONSE:\n")
+                f.write(response)
+                f.write("\n")
+            logger.debug(f"Appended response to file for {agent_name}: {file_path}")
+        except Exception as e:
+            raise FileSystemError(f"Failed to append response file for {agent_name}: {e}")
     
     def write_structured_data(self, agent_name: str, data: Dict[str, Any]) -> None:
         """
@@ -276,3 +309,13 @@ class ReadOnlyFileSystem(FileSystem):
     def record_event(self, event_type: str, data: Dict[str, Any]) -> None:
         """No-op event recording in replay mode."""
         logger.debug(f"ReadOnlyFileSystem: Ignoring event record attempt for type {event_type}")
+
+    def create_query_file(self, agent_name: str, ticks: int, query_timestamp: str, payload: Dict[str, Any]) -> str:
+        """No-op in replay mode; return expected file path."""
+        file_path = os.path.join(self.working_dir, f"{agent_name}_{ticks}.txt")
+        logger.debug(f"ReadOnlyFileSystem: Ignoring create_query_file for {file_path}")
+        return file_path
+
+    def append_response_file(self, agent_name: str, ticks: int, response_timestamp: str, response: str) -> None:
+        """No-op in replay mode."""
+        logger.debug(f"ReadOnlyFileSystem: Ignoring append_response_file for {agent_name}_{ticks}.txt")

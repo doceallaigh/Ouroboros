@@ -121,14 +121,32 @@ class Agent:
                 
                 logger.debug(f"Agent {self.name} executing task (attempt {attempt + 1}/{self.MAX_RETRIES}, timeout={current_timeout}s)")
                 
-                # Send and receive through channel
-                self.channel.send_message(payload)
-                response = asyncio.run(self.channel.receive_message())
+                # Send message and get ticks id for this query
+                ticks = self.channel.send_message(payload)
+
+                # Record query file with timestamp and payload
+                query_ts = __import__("datetime").datetime.now().isoformat()
+                try:
+                    self.filesystem.create_query_file(self.name, ticks, query_ts, payload)
+                except Exception:
+                    logger.exception("Failed to create query file")
+
+                # Receive response (channel returns (response, ticks))
+                response, returned_ticks = asyncio.run(self.channel.receive_message())
+                if returned_ticks is None:
+                    returned_ticks = ticks
                 
                 # Extract and store result
                 result = extract_content_from_response(response)
-                
-                # Store output for replay capability
+
+                # Append response timestamp and content to the per-query file
+                resp_ts = __import__("datetime").datetime.now().isoformat()
+                try:
+                    self.filesystem.append_response_file(self.name, returned_ticks, resp_ts, result)
+                except Exception:
+                    logger.exception("Failed to append response to query file")
+
+                # Also store latest output for replay capability
                 self.filesystem.write_data(self.name, result)
                 
                 logger.info(f"Agent {self.name} completed task")

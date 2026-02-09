@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from typing import Any, Dict, Optional
 from httpx import AsyncClient, Response as HTTPXResponse
 
@@ -152,7 +153,7 @@ class Channel(ABC):
         pass
     
     @abstractmethod
-    async def receive_message(self) -> HTTPXResponse:
+    async def receive_message(self) -> "tuple[HTTPXResponse, Optional[int]]":
         """
         Receive a message response through this channel.
         
@@ -173,33 +174,36 @@ class APIChannel(Channel):
         self.pending_replies = []
         self.timeout = config.get("timeout", 120)
     
-    def send_message(self, message: Dict[str, Any]) -> None:
-        """Queue message for sending."""
+    def send_message(self, message: Dict[str, Any]) -> int:
+        """Queue message for sending and return ticks identifier."""
         try:
             validated_msg = sanitize_input(message)
-            self.pending_replies.append(validated_msg)
-            logger.debug(f"Queued message for {self.agent_name}")
+            ticks = int(time.time() * 1000)
+            # store tuple of (payload, ticks)
+            self.pending_replies.append((validated_msg, ticks))
+            logger.debug(f"Queued message for {self.agent_name} with ticks={ticks}")
+            return ticks
         except ValidationError as e:
             raise CommunicationError(f"Invalid message: {e}")
     
-    async def receive_message(self) -> HTTPXResponse:
-        """Send queued message and receive response."""
+    async def receive_message(self) -> "tuple[HTTPXResponse, Optional[int]]":
+        """Send queued message and receive response, returning (response, ticks)."""
         if not self.pending_replies:
             raise APIError("No pending messages to send")
-        
-        payload = self.pending_replies.pop(0)
+
+        payload, ticks = self.pending_replies.pop(0)
         endpoint = self.config.get("endpoint", "http://localhost:12345/v1/chat/completions")
-        
+
         client = AsyncClient()
         try:
-            logger.debug(f"Sending request to {endpoint}")
+            logger.debug(f"Sending request to {endpoint} (ticks={ticks})")
             response = await client.post(
                 url=endpoint,
                 json=payload,
                 timeout=self.timeout,
             )
-            logger.debug(f"Received response with status {response.status_code}")
-            return response
+            logger.debug(f"Received response with status {response.status_code} (ticks={ticks})")
+            return response, ticks
         except asyncio.TimeoutError:
             raise APIError(f"API request timed out after {self.timeout}s")
         except Exception as e:
@@ -221,13 +225,19 @@ class ReplayChannel(Channel):
         """
         super().__init__(config)
         self.replay_data_loader = replay_data_loader
+        # keep pending_replies for ticks tracking similar to APIChannel
+        self.pending_replies = []
     
-    def send_message(self, message: Dict[str, Any]) -> None:
-        """No-op for replay mode."""
-        logger.debug(f"Replay mode - skipping send for {self.agent_name}")
+    def send_message(self, message: Dict[str, Any]) -> int:
+        """Register a send in replay mode and return ticks."""
+        validated_msg = sanitize_input(message)
+        ticks = int(time.time() * 1000)
+        self.pending_replies.append((validated_msg, ticks))
+        logger.debug(f"Replay mode - registered send for {self.agent_name} with ticks={ticks}")
+        return ticks
     
-    async def receive_message(self) -> HTTPXResponse:
-        """Retrieve recorded response."""
+    async def receive_message(self) -> "tuple[HTTPXResponse, Optional[int]]":
+        """Retrieve recorded response and return (response, ticks)."""
         try:
             raw = self.replay_data_loader(self.agent_name) or ""
             raw = sanitize_output(raw)
@@ -236,8 +246,12 @@ class ReplayChannel(Channel):
                 headers={"Content-Type": "application/json"},
                 content=raw.encode("utf-8") if isinstance(raw, str) else raw,
             )
-            logger.debug(f"Loaded replay data for {self.agent_name}")
-            return resp
+            # Pop ticks if available
+            ticks = None
+            if self.pending_replies:
+                _, ticks = self.pending_replies.pop(0)
+            logger.debug(f"Loaded replay data for {self.agent_name} (ticks={ticks})")
+            return resp, ticks
         except Exception as e:
             raise APIError(f"Failed to load replay data: {e}")
 
