@@ -283,18 +283,23 @@ class TestCentralCoordinator(MockedNetworkTestCase):
 
     @patch('builtins.open')
     def test_decompose_request(self, mock_open):
-        """Should decompose request using manager agent."""
+        """Should decompose request using manager agent with valid JSON."""
         with patch('main.json.load', return_value=self.config):
             with patch('main.Agent') as mock_agent_class:
                 mock_agent_instance = Mock()
-                mock_agent_instance.execute_task.return_value = "Task 1, Task 2"
+                # Return valid JSON instead of plain text
+                mock_agent_instance.execute_task.return_value = json.dumps([
+                    {"role": "developer", "task": "Task 1", "sequence": 1}
+                ])
                 mock_agent_class.return_value = mock_agent_instance
                 
                 coordinator = CentralCoordinator(self.config_path, self.mock_filesystem)
                 
                 result = coordinator.decompose_request("Complex request")
                 
-                self.assertEqual(result, "Task 1, Task 2")
+                # Result should be valid JSON
+                parsed = json.loads(result)
+                self.assertIsInstance(parsed, list)
                 mock_agent_instance.execute_task.assert_called_once()
 
     @patch('builtins.open')
@@ -339,6 +344,49 @@ class TestCentralCoordinator(MockedNetworkTestCase):
                 
                 with self.assertRaises(OrganizationError):
                     coordinator.assign_and_execute("Build something")
+
+    @patch('builtins.open')
+    def test_assign_and_execute_malformed_json(self, mock_open):
+        """Should retry when manager returns malformed JSON, then succeed or fail after retries."""
+        with patch('main.json.load', return_value=self.config):
+            with patch('main.Agent') as mock_agent_class:
+                mock_agent = Mock()
+                # First call returns malformed JSON, second call returns valid JSON
+                mock_agent.execute_task.side_effect = [
+                    '[{"role": "developer", "task": "test", "role\': developer}]',  # Malformed
+                    json.dumps([{"role": "developer", "task": "Write code", "sequence": 1}])  # Valid
+                ]
+                mock_agent_class.return_value = mock_agent
+                
+                coordinator = CentralCoordinator(self.config_path, self.mock_filesystem)
+                
+                # Should succeed after retry with valid JSON
+                with patch.object(coordinator, '_execute_assignments', return_value=[]) as mock_execute:
+                    results = coordinator.assign_and_execute("Build something")
+                    
+                    # Verify it was called (indicating successful parsing)
+                    mock_execute.assert_called_once()
+                    # Verify manager was called twice (initial + 1 retry)
+                    self.assertEqual(mock_agent.execute_task.call_count, 2)
+
+    @patch('builtins.open')
+    def test_assign_and_execute_malformed_json_max_retries(self, mock_open):
+        """Should fail after max retries if JSON remains malformed."""
+        with patch('main.json.load', return_value=self.config):
+            with patch('main.Agent') as mock_agent_class:
+                mock_agent = Mock()
+                # Always return malformed JSON
+                mock_agent.execute_task.return_value = '[{"role": "developer", "task": "test", "role\': developer}]'
+                mock_agent_class.return_value = mock_agent
+                
+                coordinator = CentralCoordinator(self.config_path, self.mock_filesystem)
+                
+                with self.assertRaises(OrganizationError) as context:
+                    coordinator.assign_and_execute("Build something")
+                
+                # Verify error message indicates JSON failure after retries
+                error_msg = str(context.exception).lower()
+                self.assertTrue("json" in error_msg or "malformed" in error_msg)
 
     @patch('builtins.open')
     def test_execute_assignments_with_sequence(self, mock_open):

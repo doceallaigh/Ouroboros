@@ -354,56 +354,79 @@ class CentralCoordinator:
                     "user_prompt": user_request,
                 })
                 
-                # Validate that assigned roles exist
+                # Validate JSON and assigned roles
                 assignments = None
+                json_parse_error = None
+                
                 try:
                     assignments = json.loads(decomposition)
-                    if isinstance(assignments, list):
-                        invalid_roles = self._validate_assignment_roles(assignments)
+                except json.JSONDecodeError as e:
+                    json_parse_error = e
+                    # Retry with corrective feedback about JSON format
+                    if attempt < max_retries - 1:
+                        logger.warning(
+                            f"Manager returned malformed JSON: {str(e)}. "
+                            f"Retrying with corrective feedback..."
+                        )
+                        time.sleep(backoff_delay)
+                        backoff_delay *= 2.0
                         
-                        if invalid_roles:
-                            # Roles are invalid, record event and retry with feedback
-                            if attempt < max_retries - 1:
-                                self.filesystem.record_event(
-                                    self.filesystem.EVENT_ROLE_VALIDATION_FAILED,
-                                    {
-                                        "attempt": attempt + 1,
-                                        "invalid_roles": invalid_roles,
-                                        "user_request": user_request[:200],  # Truncate for log
-                                    }
-                                )
-                                
-                                logger.warning(
-                                    f"Manager assigned to invalid roles: {invalid_roles}. "
-                                    f"Retrying with corrective feedback..."
-                                )
-                                time.sleep(backoff_delay)
-                                backoff_delay *= 2.0
-                                
-                                # Create corrective prompt
-                                valid_roles = list(self.config.keys())
-                                corrective_request = (
-                                    f"{user_request}\n\n"
-                                    f"[SYSTEM CONSTRAINT: You must ONLY assign tasks to these roles: {valid_roles}]"
-                                )
-                                user_request = corrective_request
-                                
-                                # Record retry event
-                                self.filesystem.record_event(
-                                    self.filesystem.EVENT_ROLE_RETRY,
-                                    {
-                                        "attempt": attempt + 1,
-                                        "valid_roles": valid_roles,
-                                    }
-                                )
-                                continue
-                            else:
-                                error_msg = f"Manager failed to assign valid roles after {max_retries} attempts. Invalid roles: {invalid_roles}"
-                                logger.error(error_msg)
-                                raise OrganizationError(error_msg)
-                except json.JSONDecodeError:
-                    # Not JSON, will be handled later in assign_and_execute
-                    pass
+                        # Add JSON format reminder to prompt
+                        corrective_request = (
+                            f"{user_request}\n\n"
+                            f"[IMPORTANT: Your response MUST be valid JSON. Previous attempt had error: {str(e)}]"
+                        )
+                        user_request = corrective_request
+                        continue
+                    else:
+                        error_msg = f"Manager failed to return valid JSON after {max_retries} attempts. Error: {str(e)}"
+                        logger.error(error_msg)
+                        raise OrganizationError(error_msg)
+                
+                # Validate assigned roles if JSON was parsed successfully
+                if isinstance(assignments, list):
+                    invalid_roles = self._validate_assignment_roles(assignments)
+                    
+                    if invalid_roles:
+                        # Roles are invalid, record event and retry with feedback
+                        if attempt < max_retries - 1:
+                            self.filesystem.record_event(
+                                self.filesystem.EVENT_ROLE_VALIDATION_FAILED,
+                                {
+                                    "attempt": attempt + 1,
+                                    "invalid_roles": invalid_roles,
+                                    "user_request": user_request[:200],  # Truncate for log
+                                }
+                            )
+                            
+                            logger.warning(
+                                f"Manager assigned to invalid roles: {invalid_roles}. "
+                                f"Retrying with corrective feedback..."
+                            )
+                            time.sleep(backoff_delay)
+                            backoff_delay *= 2.0
+                            
+                            # Create corrective prompt
+                            valid_roles = list(self.config.keys())
+                            corrective_request = (
+                                f"{user_request}\n\n"
+                                f"[SYSTEM CONSTRAINT: You must ONLY assign tasks to these roles: {valid_roles}]"
+                            )
+                            user_request = corrective_request
+                            
+                            # Record retry event
+                            self.filesystem.record_event(
+                                self.filesystem.EVENT_ROLE_RETRY,
+                                {
+                                    "attempt": attempt + 1,
+                                    "valid_roles": valid_roles,
+                                }
+                            )
+                            continue
+                        else:
+                            error_msg = f"Manager failed to assign valid roles after {max_retries} attempts. Invalid roles: {invalid_roles}"
+                            logger.error(error_msg)
+                            raise OrganizationError(error_msg)
                 
                 # Record successful decomposition event
                 if assignments is not None:
@@ -468,15 +491,21 @@ class CentralCoordinator:
             decomposition = self.decompose_request(user_request)
             
             # Step 2: Parse decomposition (handle various formats)
+            # Note: JSON parsing and validation happens in decompose_request with retries
             try:
                 assignments = json.loads(decomposition)
                 if not isinstance(assignments, list):
                     # If it's a dict, try to extract task list
                     if isinstance(assignments, dict):
                         assignments = assignments.get("tasks", [])
-            except json.JSONDecodeError:
-                logger.warning("Decomposition not in JSON format, treating as single task")
-                assignments = []
+                    else:
+                        # This shouldn't happen if decompose_request validated properly
+                        logger.warning(f"Unexpected response format: {type(assignments)}. Treating as empty assignments.")
+                        assignments = []
+            except json.JSONDecodeError as e:
+                # This shouldn't happen if decompose_request validated properly, but handle gracefully
+                logger.error(f"Unexpected JSON error in assign_and_execute: {str(e)}")
+                raise OrganizationError(f"Failed to parse manager response: {str(e)}")
             
             # Step 3: Execute tasks in parallel
             results = self._execute_assignments(assignments, user_request)
