@@ -105,6 +105,8 @@ class Agent:
         base_timeout = self.config.get("timeout", 120)
         backoff_delay = 1.0
         last_error = None
+        ticks = None
+        response_recorded = False  # Flag to ensure we only record response once
         
         for attempt in range(self.MAX_RETRIES):
             try:
@@ -130,15 +132,20 @@ class Agent:
                 
                 logger.debug(f"Agent {self.name} executing task (attempt {attempt + 1}/{self.MAX_RETRIES}, timeout={current_timeout}s)")
                 
-                # Send message and get ticks id for this query
-                ticks = self.channel.send_message(payload)
+                # Send message and get ticks id for this query (generate on first attempt only)
+                if ticks is None:
+                    ticks = self.channel.send_message(payload)
+                else:
+                    # On retry, send with same ticks but don't overwrite it
+                    self.channel.send_message(payload)
 
-                # Record query file with timestamp and payload
-                query_ts = __import__("datetime").datetime.now().isoformat()
-                try:
-                    self.filesystem.create_query_file(self.name, ticks, query_ts, payload)
-                except Exception:
-                    logger.exception("Failed to create query file")
+                # Record query file with timestamp and payload (only on first attempt)
+                if attempt == 0:
+                    query_ts = __import__("datetime").datetime.now().isoformat()
+                    try:
+                        self.filesystem.create_query_file(self.name, ticks, query_ts, payload)
+                    except Exception:
+                        logger.exception("Failed to create query file")
 
                 # Receive response (channel may return response or set channel.last_ticks)
                 resp_result = asyncio.run(self.channel.receive_message())
@@ -153,15 +160,16 @@ class Agent:
                 # Extract and store result
                 result = extract_content_from_response(response)
 
-                # Append response timestamp and content to the per-query file
-                resp_ts = __import__("datetime").datetime.now().isoformat()
-                try:
-                    self.filesystem.append_response_file(self.name, returned_ticks, resp_ts, result)
-                except Exception:
-                    logger.exception("Failed to append response to query file")
+                # Append response timestamp and content to the per-query file (only once)
+                if not response_recorded:
+                    resp_ts = __import__("datetime").datetime.now().isoformat()
+                    try:
+                        self.filesystem.append_response_file(self.name, returned_ticks, resp_ts, result)
+                        response_recorded = True
+                    except Exception:
+                        logger.exception("Failed to append response to query file")
 
-                # Also store latest output for replay capability
-                self.filesystem.write_data(self.name, result)
+                # (Removed write_data; replay now uses per-query files in order)
                 
                 logger.info(f"Agent {self.name} completed task")
                 return result
@@ -262,8 +270,15 @@ class CentralCoordinator:
             raise OrganizationError(f"Failed to initialize coordinator: {e}")
     
     def _load_replay_data(self, agent_name: str) -> Optional[str]:
-        """Load replay data for an agent."""
-        return self.filesystem.get_recorded_output(agent_name)
+        """Load replay data for an agent, in timestamp order."""
+        if not hasattr(self, "_replay_pointers"):
+            self._replay_pointers = {}
+        outputs = self.filesystem.get_recorded_outputs_in_order(agent_name)
+        idx = self._replay_pointers.get(agent_name, 0)
+        if idx < len(outputs):
+            self._replay_pointers[agent_name] = idx + 1
+            return outputs[idx][1]
+        return None
     
     def _find_agent_config(self, role: str) -> Optional[Dict[str, str]]:
         """
@@ -330,10 +345,11 @@ class CentralCoordinator:
         max_retries = 2
         backoff_delay = 1.0
         
+        # Create manager once outside the retry loop to avoid duplicate agents
+        manager = self._create_agent_for_role("manager")
+        
         for attempt in range(max_retries):
             try:
-                manager = self._create_agent_for_role("manager")
-                
                 decomposition = manager.execute_task({
                     "user_prompt": user_request,
                 })

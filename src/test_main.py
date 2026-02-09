@@ -464,6 +464,43 @@ class TestCoordinatorWithReplayMode(MockedNetworkTestCase):
             self.assertEqual(data, "Recorded output")
             self.mock_filesystem.get_recorded_output.assert_called_once_with("test_agent")
 
+    @patch('builtins.open')
+    def test_decompose_request_no_duplicate_managers(self, mock_open):
+        """Should create only one manager agent even when retrying with invalid roles."""
+        with patch('main.json.load', return_value=self.config):
+            with patch('main.Agent') as mock_agent_class:
+                # Track how many times Agent is created with manager role
+                manager_creation_count = 0
+                
+                def track_agent_creation(config, factory, fs, instance_number=1):
+                    nonlocal manager_creation_count
+                    mock_agent = Mock()
+                    if config.get("role") == "manager":
+                        manager_creation_count += 1
+                        # First attempt returns invalid role, second returns valid
+                        if manager_creation_count == 1:
+                            mock_agent.execute_task.side_effect = [
+                                json.dumps([{"role": "invalid_role", "task": "Do something", "sequence": 1}]),
+                                json.dumps([{"role": "developer", "task": "Do something", "sequence": 1}])
+                            ]
+                        mock_agent.name = f"manager{instance_number:02d}"
+                    return mock_agent
+                
+                mock_agent_class.side_effect = track_agent_creation
+                
+                coordinator = CentralCoordinator(self.config_path, self.mock_filesystem)
+                
+                # This should trigger the retry logic due to invalid role
+                try:
+                    result = coordinator.decompose_request("Build something")
+                    # Verify only one manager was created despite retry
+                    self.assertEqual(manager_creation_count, 1, 
+                                   "Should create only ONE manager agent, not multiple during retries")
+                except OrganizationError:
+                    # Even if it fails, still verify only one manager was created
+                    self.assertEqual(manager_creation_count, 1,
+                                   "Should create only ONE manager agent, not multiple during retries")
+
 
 class TestOrganizationError(MockedNetworkTestCase):
     """Test cases for OrganizationError exception."""

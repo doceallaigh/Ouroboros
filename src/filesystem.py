@@ -23,6 +23,36 @@ class FileSystemError(Exception):
 
 
 class FileSystem:
+    def get_recorded_outputs_in_order(self, agent_name: str) -> list:
+        """
+        Retrieve all recorded outputs for an agent, sorted by query timestamp.
+
+        Returns:
+            List of (query_timestamp, content) tuples, sorted by timestamp.
+        """
+        outputs = []
+        try:
+            file_paths = sorted(
+                f for f in os.listdir(self.working_dir)
+                if f.startswith(agent_name) and f.endswith(".txt")
+            )
+            for file_path in file_paths:
+                full_path = os.path.join(self.working_dir, file_path)
+                with open(full_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                # Extract QUERY_TIMESTAMP from the file
+                first_line = content.splitlines()[0] if content else ""
+                if first_line.startswith("QUERY_TIMESTAMP:"):
+                    ts = first_line.split(":", 1)[1].strip()
+                else:
+                    ts = ""
+                outputs.append((ts, content))
+            # Sort by timestamp string (ISO format sorts lexicographically)
+            outputs.sort(key=lambda x: x[0])
+            return outputs
+        except Exception as e:
+            logger.error(f"Failed to retrieve ordered outputs for {agent_name}: {e}")
+            return []
     """
     Manages file storage for communication logs and operational data.
     
