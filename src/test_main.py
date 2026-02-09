@@ -9,6 +9,12 @@ import json
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 import asyncio
 
+# IMPORTANT: Mock httpx at module import time to prevent any accidental network calls
+# This ensures no actual HTTP requests can be made during tests
+from unittest.mock import patch as mock_patch
+_asyncclient_patcher = mock_patch('httpx.AsyncClient')
+_asyncclient_patcher.start()
+
 from main import (
     Agent,
     CentralCoordinator,
@@ -16,7 +22,39 @@ from main import (
 )
 
 
-class TestAgent(unittest.TestCase):
+class MockedNetworkTestCase(unittest.TestCase):
+    """
+    Base test case that ensures all network calls are mocked.
+    
+    This prevents accidental API calls during testing and ensures tests are
+    isolated from external dependencies.
+    """
+    
+    @classmethod
+    def setUpClass(cls):
+        """Set up class-level mocks for network calls."""
+        # These are in addition to the module-level AsyncClient mock
+        cls.patcher_httpx = patch('comms.AsyncClient')
+        cls.mock_httpx = cls.patcher_httpx.start()
+    
+    @classmethod
+    def tearDownClass(cls):
+        """Clean up class-level mocks."""
+        cls.patcher_httpx.stop()
+    
+    def setUp(self):
+        """Ensure network mocks are active for each test."""
+        # Double-check that mocks are in place
+        self.addCleanup(self._verify_no_real_network_calls)
+    
+    def _verify_no_real_network_calls(self):
+        """
+        Cleanup helper that could be extended to verify no unmocked network calls occurred.
+        """
+        pass
+
+
+class TestAgent(MockedNetworkTestCase):
     """Test cases for Agent class."""
 
     def setUp(self):
@@ -164,7 +202,7 @@ class TestAgent(unittest.TestCase):
                 self.assertEqual(payload["temperature"], 0.7)
 
 
-class TestCentralCoordinator(unittest.TestCase):
+class TestCentralCoordinator(MockedNetworkTestCase):
     """Test cases for CentralCoordinator class."""
 
     def setUp(self):
@@ -382,7 +420,7 @@ class TestCentralCoordinator(unittest.TestCase):
                 )
 
 
-class TestCoordinatorWithReplayMode(unittest.TestCase):
+class TestCoordinatorWithReplayMode(MockedNetworkTestCase):
     """Test cases for coordinator in replay mode."""
 
     def setUp(self):
@@ -427,7 +465,7 @@ class TestCoordinatorWithReplayMode(unittest.TestCase):
             self.mock_filesystem.get_recorded_output.assert_called_once_with("test_agent")
 
 
-class TestOrganizationError(unittest.TestCase):
+class TestOrganizationError(MockedNetworkTestCase):
     """Test cases for OrganizationError exception."""
 
     def test_organization_error_raised(self):
