@@ -106,6 +106,27 @@ class Agent:
             OrganizationError: If task execution fails after retries
         """
         base_timeout = self.config.get("timeout", 120)
+        
+        # Parse model_endpoints configuration (supports both old and new formats)
+        model_endpoints = self.config.get("model_endpoints", [])
+        if not model_endpoints:
+            # Fallback to old separate model/endpoint format for backward compatibility
+            model = self.config.get("model", "qwen/qwen2-7b")
+            endpoint = self.config.get("endpoint", "http://localhost:12345/v1/chat/completions")
+            if isinstance(model, str):
+                model = [model]
+            if isinstance(endpoint, str):
+                endpoint = [endpoint]
+            if not model:
+                model = ["qwen/qwen2-7b"]
+            if not endpoint:
+                endpoint = ["http://localhost:12345/v1/chat/completions"]
+            # Convert old format to model_endpoints
+            model_endpoints = [{"model": m, "endpoint": e} for m, e in zip(model, endpoint)]
+        
+        if not model_endpoints:
+            model_endpoints = [{"model": "qwen/qwen2-7b", "endpoint": "http://localhost:12345/v1/chat/completions"}]
+        
         backoff_delay = 1.0
         last_error = None
         ticks = None
@@ -116,6 +137,12 @@ class Agent:
                 # Increase timeout with each retry
                 current_timeout = base_timeout * (self.INITIAL_TIMEOUT_MULTIPLIER ** attempt)
                 
+                # Select model/endpoint pair for this attempt (failover to next pair on retry)
+                pair_index = min(attempt, len(model_endpoints) - 1)
+                selected_pair = model_endpoints[pair_index]
+                selected_model = selected_pair["model"]
+                selected_endpoint = selected_pair["endpoint"]
+
                 # Build the message payload
                 payload = {
                     "messages": [
@@ -128,12 +155,18 @@ class Agent:
                             "content": task.get("user_prompt", "")
                         }
                     ],
-                    "model": self.config.get("model", "qwen/qwen2-7b"),
+                    "model": selected_model,
                     "temperature": float(self.config.get("temperature", 0.7)),
                     "max_tokens": int(self.config.get("max_tokens", -1)),
                 }
                 
-                logger.debug(f"Agent {self.name} executing task (attempt {attempt + 1}/{self.MAX_RETRIES}, timeout={current_timeout}s)")
+                # Update endpoint per attempt for failover
+                self.channel.config["endpoint"] = selected_endpoint
+
+                logger.debug(
+                    f"Agent {self.name} executing task (attempt {attempt + 1}/{self.MAX_RETRIES}, "
+                    f"timeout={current_timeout}s, model={selected_model}, endpoint={selected_endpoint})"
+                )
                 
                 # Send message and get ticks id for this query (generate on first attempt only)
                 if ticks is None:

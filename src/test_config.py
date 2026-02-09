@@ -209,7 +209,9 @@ class TestValidateAgentConfig(unittest.TestCase):
             "name": "Developer Agent",
             "role": "developer",
             "system_prompt": "You are a developer",
-            "model": "gpt-3.5",
+            "model_endpoints": [
+                {"model": "gpt-3.5", "endpoint": "http://api.example.com"}
+            ],
             "temperature": 0.7,
             "max_tokens": 1000
         }
@@ -228,7 +230,9 @@ class TestValidateAgentConfig(unittest.TestCase):
             "name": "Developer Agent",
             "role": "developer",
             "system_prompt": "You are a developer",
-            "endpoint": "http://api.example.com",
+            "model_endpoints": [
+                {"model": "gpt-3.5", "endpoint": "http://api.example.com"}
+            ],
             "timeout": 120,
             "tags": ["python", "backend"]
         }

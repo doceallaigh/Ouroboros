@@ -106,7 +106,9 @@ class TestAgent(MockedNetworkTestCase):
         auditor_config = {
             "role": "auditor",
             "system_prompt": "Review code",
-            "model": "gpt-3.5",
+            "model_endpoints": [
+                {"model": "gpt-3.5", "endpoint": "http://localhost:8000/api"}
+            ],
             "temperature": 0.3,
             "max_tokens": 1000,
         }
@@ -587,7 +589,9 @@ class TestCallbackMechanism(MockedNetworkTestCase):
         self.config = {
             "role": "developer",
             "system_prompt": "You are a developer",
-            "model": "gpt-3.5",
+            "model_endpoints": [
+                {"model": "gpt-3.5", "endpoint": "http://localhost:8000/api"}
+            ],
             "temperature": 0.7,
             "max_tokens": 1000,
         }

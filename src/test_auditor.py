@@ -40,7 +40,9 @@ class TestAuditorRole(unittest.TestCase):
         auditor_config = {
             "role": "auditor",
             "system_prompt": "Review code quality",
-            "model": "test-model",
+            "model_endpoints": [
+                {"model": "test-model", "endpoint": "http://localhost:8000/api"}
+            ],
             "temperature": 0.3,
             "max_tokens": 1000
         }
