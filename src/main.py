@@ -76,8 +76,8 @@ class Agent:
         self.filesystem = filesystem
         self.callback_handler = None  # Will be set by coordinator if callbacks are needed
         
-        # For developer role, inject tools description into the prompt
-        if self.role == "developer":
+        # For roles that need file access, inject tools description into the prompt
+        if self.role in ["developer", "auditor", "manager"]:
             tools_desc = get_tools_description()
             original_prompt = self.config.get("system_prompt", "")
             # Append tools description if not already present
@@ -764,9 +764,9 @@ class CentralCoordinator:
                 "user_prompt": task_description,
             })
             
-            # For developer role, execute any tool calls in the response
+            # For roles that use tools, execute any tool calls in the response
             tool_results = None
-            if role == "developer":
+            if role in ["developer", "auditor"]:
                 tool_results = agent.execute_tools_from_response(result_text, working_dir=self.filesystem.working_dir)
             
             # Record task completion event
@@ -830,11 +830,12 @@ Examples:
       Run default task: "Build a simple Hello World application"
 
 Features:
-  - Multi-agent collaboration with manager and developer roles
+  - Multi-agent collaboration with manager, developer, and auditor roles
   - Task decomposition and parallel execution
   - Event sourcing for audit trail and replay
   - Tool-based file operations within sandboxed workspace
   - Callback mechanism for agent-to-agent communication
+  - Automatic code review and quality assurance via auditor role
 
 Directory Structure:
   roles.json       Agent role configurations (system prompts, models)

@@ -101,6 +101,23 @@ class TestAgent(MockedNetworkTestCase):
             # Verify original config is not modified
             self.assertNotIn("Available tools", self.config.get("system_prompt", ""))
 
+    def test_auditor_role_gets_tools(self):
+        """Should inject tools for auditor role."""
+        auditor_config = {
+            "role": "auditor",
+            "system_prompt": "Review code",
+            "model": "gpt-3.5",
+            "temperature": 0.3,
+            "max_tokens": 1000,
+        }
+        agent = Agent(auditor_config, self.mock_channel_factory, self.mock_filesystem, instance_number=1)
+        
+        # Verify tools were injected for auditor
+        called_config = self.mock_channel_factory.create_channel.call_args[0][0]
+        self.assertIn("Available tools", called_config.get("system_prompt", ""))
+        self.assertEqual(agent.name, "auditor01")
+        self.assertEqual(agent.role, "auditor")
+
     def test_execute_task_success(self):
         """Should execute task successfully."""
         mock_response = Mock()
@@ -219,6 +236,10 @@ class TestCentralCoordinator(MockedNetworkTestCase):
             "developer": {
                 "role": "developer",
                 "system_prompt": "Write code",
+            },
+            "auditor": {
+                "role": "auditor",
+                "system_prompt": "Review code",
             }
         }
         self.mock_filesystem = Mock()
@@ -232,7 +253,7 @@ class TestCentralCoordinator(MockedNetworkTestCase):
         with patch('main.json.load', return_value=self.config):
             coordinator = CentralCoordinator(self.config_path, self.mock_filesystem)
             
-            self.assertEqual(len(coordinator.config), 2)
+            self.assertEqual(len(coordinator.config), 3)  # manager, developer, auditor
             self.assertFalse(coordinator.replay_mode)
 
     @patch('builtins.open')
