@@ -15,6 +15,7 @@ from agent_tools import (
     ToolError,
     PathError,
     FileSizeError,
+    PackageError,
     get_tools,
 )
 
@@ -414,6 +415,94 @@ class TestHelperFunctions(unittest.TestCase):
         finally:
             import shutil
             shutil.rmtree(temp_dir)
+
+
+class TestPackageManagement(unittest.TestCase):
+    """Test package search and installation tools."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.tools = AgentTools(working_dir=self.temp_dir)
+
+    def tearDown(self):
+        """Clean up temporary directory."""
+        import shutil
+        shutil.rmtree(self.temp_dir)
+
+    def test_validate_package_name_valid(self):
+        """Should validate correct package names."""
+        valid_names = [
+            "requests",
+            "numpy",
+            "pandas",
+            "my-package",
+            "my_package",
+            "my.package",
+            "pytest-cov",
+            "my_pkg-2.0",
+        ]
+        for name in valid_names:
+            self.assertTrue(
+                self.tools._validate_package_name(name),
+                f"Should accept valid package name: {name}"
+            )
+
+    def test_validate_package_name_invalid(self):
+        """Should reject malicious package names."""
+        invalid_names = [
+            "",
+            None,
+            "package;rm -rf /",
+            "package|cat /etc/passwd",
+            "package && malicious",
+            "package`whoami`",
+            "package$(whoami)",
+            "../package",
+            "/etc/package",
+            "\\windows\\system32",
+            "package/subdir",
+        ]
+        for name in invalid_names:
+            self.assertFalse(
+                self.tools._validate_package_name(name),
+                f"Should reject invalid package name: {name}"
+            )
+
+    def test_check_package_installed_python(self):
+        """Should check if a Python package is installed."""
+        # Check for a package that should be installed (pip itself)
+        result = self.tools.check_package_installed("pip", language="python")
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result["language"], "python")
+        self.assertTrue(result["installed"] or "error" in result)
+
+    def test_check_package_not_installed(self):
+        """Should detect when a package is not installed."""
+        result = self.tools.check_package_installed("totally-fake-package-xyz", language="python")
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result["language"], "python")
+        self.assertFalse(result["installed"])
+
+    def test_list_installed_packages_python(self):
+        """Should list installed Python packages."""
+        result = self.tools.list_installed_packages(language="python")
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result["language"], "python")
+        self.assertIsInstance(result["packages"], list)
+        self.assertGreater(result["count"], 0)  # pip should have some packages
+
+    def test_search_package_invalid_language(self):
+        """Should handle invalid language gracefully."""
+        from agent_tools import PackageError
+        with self.assertRaises(PackageError):
+            self.tools.search_package("requests", language="ruby")
+
+    def test_install_invalid_package_name(self):
+        """Should reject installation of packages with invalid names."""
+        from agent_tools import PackageError
+        with self.assertRaises(PackageError):
+            self.tools.install_package("package;rm -rf /", language="python")
 
 
 if __name__ == "__main__":
