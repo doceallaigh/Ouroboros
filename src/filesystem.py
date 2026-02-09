@@ -5,6 +5,7 @@ Responsibilities:
 - Storage of communication and operational data during runtime
 - Retrieval of data in replay mode
 - Task and conversation history management
+- Event sourcing for audit trail and replay capability
 """
 
 import datetime
@@ -26,8 +27,19 @@ class FileSystem:
     Manages file storage for communication logs and operational data.
     
     Creates a timestamped directory for each session and stores agent
-    communications within that directory.
+    communications within that directory. Also maintains an event log
+    for event sourcing and replay capability.
     """
+    
+    # Event types for event sourcing
+    EVENT_REQUEST_DECOMPOSED = "request_decomposed"
+    EVENT_TASK_ASSIGNED = "task_assigned"
+    EVENT_TASK_STARTED = "task_started"
+    EVENT_TASK_COMPLETED = "task_completed"
+    EVENT_TASK_FAILED = "task_failed"
+    EVENT_ROLE_VALIDATION_FAILED = "role_validation_failed"
+    EVENT_TIMEOUT_RETRY = "timeout_retry"
+    EVENT_ROLE_RETRY = "role_retry"
     
     def __init__(self, shared_dir: str, replay_mode: bool = False):
         """
@@ -63,8 +75,11 @@ class FileSystem:
             self.working_dir = os.path.join(self.shared_dir, self.session_id)
             os.makedirs(self.working_dir, exist_ok=True)
             
+            self.events_file = os.path.join(self.working_dir, "_events.jsonl")
+            
             logger.info(f"Initialized FileSystem with session {self.session_id}")
             logger.debug(f"Working directory: {self.working_dir}")
+            logger.debug(f"Events file: {self.events_file}")
             
         except Exception as e:
             raise FileSystemError(f"Failed to initialize filesystem: {e}")
@@ -180,13 +195,70 @@ class FileSystem:
             "working_dir": self.working_dir,
             "created_at": self.session_id,  # Session ID contains timestamp
         }
+    
+    def record_event(self, event_type: str, data: Dict[str, Any]) -> None:
+        """
+        Record an event to the event log for event sourcing.
+        
+        Events are stored as JSON Lines (JSONL) format for easy streaming/replay.
+        Each line contains a single event with timestamp.
+        
+        Args:
+            event_type: Type of event (use EVENT_* constants)
+            data: Event data dictionary
+            
+        Raises:
+            FileSystemError: If event recording fails
+        """
+        try:
+            event = {
+                "timestamp": datetime.datetime.now().isoformat(),
+                "type": event_type,
+                "data": data,
+            }
+            
+            with open(self.events_file, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(event) + '\n')
+            
+            logger.debug(f"Recorded event: {event_type}")
+        except Exception as e:
+            raise FileSystemError(f"Failed to record event: {e}")
+    
+    def get_events(self, event_type: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Retrieve recorded events, optionally filtered by type.
+        
+        Args:
+            event_type: Optional event type to filter by
+            
+        Returns:
+            List of event dictionaries
+        """
+        events = []
+        try:
+            if not os.path.exists(self.events_file):
+                return events
+            
+            with open(self.events_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if line.strip():
+                        event = json.loads(line)
+                        if event_type is None or event.get("type") == event_type:
+                            events.append(event)
+            
+            logger.debug(f"Retrieved {len(events)} events" + 
+                        (f" of type {event_type}" if event_type else ""))
+            return events
+        except Exception as e:
+            logger.error(f"Failed to retrieve events: {e}")
+            return events
 
 
 class ReadOnlyFileSystem(FileSystem):
     """
     Read-only filesystem wrapper for replay mode.
     
-    Prevents accidental writes while in replay mode.
+    Prevents accidental writes while in replay mode. Still allows reading events.
     """
     
     def write_data(self, agent_name: str, data: str) -> None:
@@ -200,3 +272,7 @@ class ReadOnlyFileSystem(FileSystem):
     def save_conversation_history(self, agent_name: str, history: List[Dict[str, str]]) -> None:
         """No-op write in replay mode."""
         logger.debug(f"ReadOnlyFileSystem: Ignoring history write attempt for agent {agent_name}")
+    
+    def record_event(self, event_type: str, data: Dict[str, Any]) -> None:
+        """No-op event recording in replay mode."""
+        logger.debug(f"ReadOnlyFileSystem: Ignoring event record attempt for type {event_type}")

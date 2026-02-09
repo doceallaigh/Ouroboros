@@ -52,18 +52,24 @@ class Agent:
         config: Dict[str, str],
         channel_factory: ChannelFactory,
         filesystem: FileSystem,
+        instance_number: int = 1,
     ):
         """
         Initialize an agent.
         
         Args:
-            config: Agent configuration dict with name, role, system_prompt, etc.
+            config: Agent configuration dict with role, system_prompt, etc.
             channel_factory: Factory for creating communication channels
             filesystem: Filesystem for storing outputs
+            instance_number: Instance number for this role (1-based, formatted as 01, 02, etc.)
+            
+        Raises:
+            OrganizationError: If agent initialization fails
         """
         self.config = config
-        self.name = config.get("name", "unknown")
         self.role = config.get("role", "unknown")
+        # Generate name from role and instance number
+        self.name = f"{self.role}{instance_number:02d}"
         self.filesystem = filesystem
         
         try:
@@ -75,6 +81,8 @@ class Agent:
     def execute_task(self, task: Dict[str, Any]) -> str:
         """
         Execute a task using this agent with retry logic for timeouts.
+        
+        Records timeout retry events for event sourcing.
         
         Args:
             task: Task dict with 'user_prompt' and optionally other fields
@@ -131,6 +139,17 @@ class Agent:
                 if "timed out" in str(e).lower():
                     last_error = e
                     if attempt < self.MAX_RETRIES - 1:
+                        # Record timeout retry event
+                        self.filesystem.record_event(
+                            self.filesystem.EVENT_TIMEOUT_RETRY,
+                            {
+                                "agent": self.name,
+                                "attempt": attempt + 1,
+                                "timeout_seconds": base_timeout * (self.INITIAL_TIMEOUT_MULTIPLIER ** attempt),
+                                "next_timeout_seconds": base_timeout * (self.INITIAL_TIMEOUT_MULTIPLIER ** (attempt + 1)),
+                            }
+                        )
+                        
                         logger.warning(
                             f"Agent {self.name} timeout (attempt {attempt + 1}/{self.MAX_RETRIES}), "
                             f"retrying in {backoff_delay}s with increased timeout"
@@ -191,6 +210,9 @@ class CentralCoordinator:
             self.filesystem = filesystem
             self.replay_mode = replay_mode
             
+            # Track instance counts for each role to generate unique names
+            self.role_instance_counts: Dict[str, int] = {}
+            
             # Create channel factory with replay data loader
             self.channel_factory = ChannelFactory(
                 replay_mode=replay_mode,
@@ -230,6 +252,8 @@ class CentralCoordinator:
         """
         Create an agent instance for a specific role.
         
+        Tracks instance counts to generate unique agent names.
+        
         Args:
             role: Role name
             
@@ -243,7 +267,17 @@ class CentralCoordinator:
         if not config:
             raise OrganizationError(f"No agent configured for role: {role}")
         
-        return Agent(config, self.channel_factory, self.filesystem)
+        # Increment instance count for this role
+        if role not in self.role_instance_counts:
+            self.role_instance_counts[role] = 0
+        self.role_instance_counts[role] += 1
+        
+        return Agent(
+            config, 
+            self.channel_factory, 
+            self.filesystem,
+            instance_number=self.role_instance_counts[role]
+        )
     
     def decompose_request(self, user_request: str) -> str:
         """
@@ -273,14 +307,24 @@ class CentralCoordinator:
                 })
                 
                 # Validate that assigned roles exist
+                assignments = None
                 try:
                     assignments = json.loads(decomposition)
                     if isinstance(assignments, list):
                         invalid_roles = self._validate_assignment_roles(assignments)
                         
                         if invalid_roles:
-                            # Roles are invalid, retry with feedback
+                            # Roles are invalid, record event and retry with feedback
                             if attempt < max_retries - 1:
+                                self.filesystem.record_event(
+                                    self.filesystem.EVENT_ROLE_VALIDATION_FAILED,
+                                    {
+                                        "attempt": attempt + 1,
+                                        "invalid_roles": invalid_roles,
+                                        "user_request": user_request[:200],  # Truncate for log
+                                    }
+                                )
+                                
                                 logger.warning(
                                     f"Manager assigned to invalid roles: {invalid_roles}. "
                                     f"Retrying with corrective feedback..."
@@ -295,6 +339,15 @@ class CentralCoordinator:
                                     f"[SYSTEM CONSTRAINT: You must ONLY assign tasks to these roles: {valid_roles}]"
                                 )
                                 user_request = corrective_request
+                                
+                                # Record retry event
+                                self.filesystem.record_event(
+                                    self.filesystem.EVENT_ROLE_RETRY,
+                                    {
+                                        "attempt": attempt + 1,
+                                        "valid_roles": valid_roles,
+                                    }
+                                )
                                 continue
                             else:
                                 error_msg = f"Manager failed to assign valid roles after {max_retries} attempts. Invalid roles: {invalid_roles}"
@@ -303,6 +356,16 @@ class CentralCoordinator:
                 except json.JSONDecodeError:
                     # Not JSON, will be handled later in assign_and_execute
                     pass
+                
+                # Record successful decomposition event
+                if assignments is not None:
+                    self.filesystem.record_event(
+                        self.filesystem.EVENT_REQUEST_DECOMPOSED,
+                        {
+                            "attempt": attempt + 1,
+                            "num_assignments": len(assignments) if isinstance(assignments, list) else 0,
+                        }
+                    )
                 
                 logger.debug(f"Request decomposed into: {decomposition}")
                 return decomposition
@@ -379,10 +442,14 @@ class CentralCoordinator:
     
     def _execute_assignments(self, assignments: List[Dict[str, Any]], user_request: str) -> List[Dict[str, Any]]:
         """
-        Execute assignments in parallel using thread pool.
+        Execute assignments respecting sequence ordering.
+        
+        Tasks with the same sequence number execute in parallel.
+        Tasks with different sequence numbers execute sequentially, with
+        sequence N+1 starting only after sequence N completes.
         
         Args:
-            assignments: List of task assignments
+            assignments: List of task assignments with 'role', 'task', and optional 'sequence' fields
             user_request: Original user request for context
             
         Returns:
@@ -394,43 +461,64 @@ class CentralCoordinator:
             logger.warning("No assignments to execute")
             return results
         
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            futures = {}
+        # Group assignments by sequence number
+        # Default sequence is 1 if not specified
+        sequences: Dict[int, List[Dict[str, Any]]] = {}
+        for i, assignment in enumerate(assignments):
+            if not assignment.get("role"):
+                logger.warning(f"Assignment {i} missing role field")
+                continue
             
-            for i, assignment in enumerate(assignments):
-                role = assignment.get("role")
-                task_desc = assignment.get("task", "")
-                
-                if not role:
-                    logger.warning(f"Assignment {i} missing role field")
-                    continue
-                
-                future = executor.submit(
-                    self._execute_single_assignment,
-                    role,
-                    task_desc,
-                    user_request,
-                )
-                futures[i] = (future, role)
+            sequence = assignment.get("sequence", 1)
+            if sequence not in sequences:
+                sequences[sequence] = []
+            sequences[sequence].append((i, assignment))
+        
+        if not sequences:
+            logger.warning("No valid assignments to execute")
+            return results
+        
+        # Execute sequences in order
+        for sequence in sorted(sequences.keys()):
+            sequence_assignments = sequences[sequence]
+            logger.info(f"Executing sequence {sequence} with {len(sequence_assignments)} tasks")
             
-            # Collect results
-            for i, (future, role) in futures.items():
-                try:
-                    result = future.result(timeout=300)  # 5 minute timeout per task
-                    results.append(result)
-                except Exception as e:
-                    logger.error(f"Assignment {i} (role: {role}) failed: {e}")
-                    results.append({
-                        "role": role,
-                        "status": "failed",
-                        "error": str(e),
-                    })
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                futures = {}
+                
+                # Submit all tasks in this sequence
+                for i, assignment in sequence_assignments:
+                    role = assignment.get("role")
+                    task_desc = assignment.get("task", "")
+                    
+                    future = executor.submit(
+                        self._execute_single_assignment,
+                        role,
+                        task_desc,
+                        user_request,
+                    )
+                    futures[i] = (future, role)
+                
+                # Collect results from this sequence
+                for i, (future, role) in futures.items():
+                    try:
+                        result = future.result(timeout=300)  # 5 minute timeout per task
+                        results.append(result)
+                    except Exception as e:
+                        logger.error(f"Assignment {i} (role: {role}) failed: {e}")
+                        results.append({
+                            "role": role,
+                            "status": "failed",
+                            "error": str(e),
+                        })
         
         return results
     
     def _execute_single_assignment(self, role: str, task: str, original_request: str) -> Dict[str, Any]:
         """
         Execute a single task assignment.
+        
+        Records events for task start and completion/failure.
         
         Args:
             role: Agent role
@@ -441,11 +529,29 @@ class CentralCoordinator:
             Result dict with status and output
         """
         try:
+            # Record task start event
+            self.filesystem.record_event(
+                self.filesystem.EVENT_TASK_STARTED,
+                {
+                    "role": role,
+                    "task": task[:200],  # Truncate for log
+                }
+            )
+            
             agent = self._create_agent_for_role(role)
             
             result_text = agent.execute_task({
                 "user_prompt": task,
             })
+            
+            # Record task completion event
+            self.filesystem.record_event(
+                self.filesystem.EVENT_TASK_COMPLETED,
+                {
+                    "role": role,
+                    "output_length": len(result_text),
+                }
+            )
             
             return {
                 "role": role,
@@ -455,6 +561,14 @@ class CentralCoordinator:
             }
             
         except Exception as e:
+            # Record task failure event
+            self.filesystem.record_event(
+                self.filesystem.EVENT_TASK_FAILED,
+                {
+                    "role": role,
+                    "error": str(e)[:200],  # Truncate for log
+                }
+            )
             logger.error(f"Task execution failed for role {role}: {e}")
             raise
 
