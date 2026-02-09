@@ -116,7 +116,7 @@ def extract_content_from_response(response: HTTPXResponse) -> str:
     try:
         # Try standard OpenAI-style response structure
         result = response.json()["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError):
+    except (KeyError, IndexError, TypeError, ValueError):
         # Fallback to raw body
         try:
             result = response.text
@@ -272,6 +272,3 @@ class ChannelFactory:
             return ReplayChannel(agent_config, self.replay_data_loader)
         else:
             return APIChannel(agent_config)
-
-
-

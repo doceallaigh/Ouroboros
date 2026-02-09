@@ -13,10 +13,11 @@ import json
 import logging
 import os
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Any, Optional
 
-from comms import ChannelFactory, CommunicationError, extract_content_from_response
+from comms import ChannelFactory, CommunicationError, APIError, extract_content_from_response
 from filesystem import FileSystem, ReadOnlyFileSystem, FileSystemError
 
 # Configure logging
@@ -40,6 +41,11 @@ class Agent:
     An agent has a specific role and system prompt that guide its behavior.
     It communicates through a channel and stores results in the filesystem.
     """
+    
+    # Retry configuration constants
+    MAX_RETRIES = 3
+    INITIAL_TIMEOUT_MULTIPLIER = 1.5  # Multiply timeout by this for each retry
+    BACKOFF_MULTIPLIER = 2.0  # Exponential backoff multiplier
     
     def __init__(
         self,
@@ -68,7 +74,7 @@ class Agent:
     
     def execute_task(self, task: Dict[str, Any]) -> str:
         """
-        Execute a task using this agent.
+        Execute a task using this agent with retry logic for timeouts.
         
         Args:
             task: Task dict with 'user_prompt' and optionally other fields
@@ -77,45 +83,80 @@ class Agent:
             Agent's response as string
             
         Raises:
-            OrganizationError: If task execution fails
+            OrganizationError: If task execution fails after retries
         """
-        try:
-            # Build the message payload
-            payload = {
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": self.config.get("system_prompt", "")
-                    },
-                    {
-                        "role": "user",
-                        "content": task.get("user_prompt", "")
-                    }
-                ],
-                "model": self.config.get("model", "qwen/qwen2-7b"),
-                "temperature": float(self.config.get("temperature", 0.7)),
-                "max_tokens": int(self.config.get("max_tokens", -1)),
-            }
+        base_timeout = self.config.get("timeout", 120)
+        backoff_delay = 1.0
+        last_error = None
+        
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                # Increase timeout with each retry
+                current_timeout = base_timeout * (self.INITIAL_TIMEOUT_MULTIPLIER ** attempt)
+                
+                # Build the message payload
+                payload = {
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": self.config.get("system_prompt", "")
+                        },
+                        {
+                            "role": "user",
+                            "content": task.get("user_prompt", "")
+                        }
+                    ],
+                    "model": self.config.get("model", "qwen/qwen2-7b"),
+                    "temperature": float(self.config.get("temperature", 0.7)),
+                    "max_tokens": int(self.config.get("max_tokens", -1)),
+                }
+                
+                logger.debug(f"Agent {self.name} executing task (attempt {attempt + 1}/{self.MAX_RETRIES}, timeout={current_timeout}s)")
+                
+                # Send and receive through channel
+                self.channel.send_message(payload)
+                response = asyncio.run(self.channel.receive_message())
+                
+                # Extract and store result
+                result = extract_content_from_response(response)
+                
+                # Store output for replay capability
+                self.filesystem.write_data(self.name, result)
+                
+                logger.info(f"Agent {self.name} completed task")
+                return result
+                
+            except APIError as e:
+                # Check if it's a timeout error
+                if "timed out" in str(e).lower():
+                    last_error = e
+                    if attempt < self.MAX_RETRIES - 1:
+                        logger.warning(
+                            f"Agent {self.name} timeout (attempt {attempt + 1}/{self.MAX_RETRIES}), "
+                            f"retrying in {backoff_delay}s with increased timeout"
+                        )
+                        time.sleep(backoff_delay)
+                        backoff_delay *= self.BACKOFF_MULTIPLIER
+                        continue
+                    else:
+                        error_msg = f"Agent {self.name} task execution failed after {self.MAX_RETRIES} retries: {str(e)}"
+                        logger.error(error_msg)
+                        raise OrganizationError(error_msg)
+                else:
+                    # Non-timeout API error, don't retry
+                    error_msg = f"Agent {self.name} task execution failed: {str(e)}"
+                    logger.error(error_msg)
+                    raise OrganizationError(error_msg)
             
-            logger.debug(f"Agent {self.name} executing task")
-            
-            # Send and receive through channel
-            self.channel.send_message(payload)
-            response = asyncio.run(self.channel.receive_message())
-            
-            # Extract and store result
-            result = extract_content_from_response(response)
-            
-            # Store output for replay capability
-            self.filesystem.write_data(self.name, result)
-            
-            logger.info(f"Agent {self.name} completed task")
-            return result
-            
-        except Exception as e:
-            error_msg = f"Agent {self.name} task execution failed: {str(e)}"
-            logger.error(error_msg)
-            raise OrganizationError(error_msg)
+            except Exception as e:
+                error_msg = f"Agent {self.name} task execution failed: {str(e)}"
+                logger.error(error_msg)
+                raise OrganizationError(error_msg)
+        
+        # Should not reach here, but handle just in case
+        error_msg = f"Agent {self.name} task execution failed after {self.MAX_RETRIES} retries: {str(last_error)}"
+        logger.error(error_msg)
+        raise OrganizationError(error_msg)
 
 
 class CentralCoordinator:
@@ -208,25 +249,93 @@ class CentralCoordinator:
         """
         Use a manager agent to decompose a request into tasks.
         
+        Validates that assigned roles exist. If manager assigns to invalid roles,
+        retries with corrective feedback.
+        
         Args:
             user_request: User's high-level request
             
         Returns:
             Decomposed tasks as string (usually JSON)
+            
+        Raises:
+            OrganizationError: If decomposition fails after retries
         """
-        try:
-            manager = self._create_agent_for_role("manager")
+        max_retries = 2
+        backoff_delay = 1.0
+        
+        for attempt in range(max_retries):
+            try:
+                manager = self._create_agent_for_role("manager")
+                
+                decomposition = manager.execute_task({
+                    "user_prompt": user_request,
+                })
+                
+                # Validate that assigned roles exist
+                try:
+                    assignments = json.loads(decomposition)
+                    if isinstance(assignments, list):
+                        invalid_roles = self._validate_assignment_roles(assignments)
+                        
+                        if invalid_roles:
+                            # Roles are invalid, retry with feedback
+                            if attempt < max_retries - 1:
+                                logger.warning(
+                                    f"Manager assigned to invalid roles: {invalid_roles}. "
+                                    f"Retrying with corrective feedback..."
+                                )
+                                time.sleep(backoff_delay)
+                                backoff_delay *= 2.0
+                                
+                                # Create corrective prompt
+                                valid_roles = list(self.config.keys())
+                                corrective_request = (
+                                    f"{user_request}\n\n"
+                                    f"[SYSTEM CONSTRAINT: You must ONLY assign tasks to these roles: {valid_roles}]"
+                                )
+                                user_request = corrective_request
+                                continue
+                            else:
+                                error_msg = f"Manager failed to assign valid roles after {max_retries} attempts. Invalid roles: {invalid_roles}"
+                                logger.error(error_msg)
+                                raise OrganizationError(error_msg)
+                except json.JSONDecodeError:
+                    # Not JSON, will be handled later in assign_and_execute
+                    pass
+                
+                logger.debug(f"Request decomposed into: {decomposition}")
+                return decomposition
+                
+            except OrganizationError:
+                raise
+            except Exception as e:
+                error_msg = f"Failed to decompose request: {e}"
+                logger.error(error_msg)
+                raise OrganizationError(error_msg)
+        
+        raise OrganizationError("Decomposition failed after maximum retries")
+    
+    def _validate_assignment_roles(self, assignments: List[Dict[str, Any]]) -> List[str]:
+        """
+        Validate that all assigned roles exist in the configuration.
+        
+        Args:
+            assignments: List of task assignments
             
-            decomposition = manager.execute_task({
-                "user_prompt": user_request,
-            })
-            
-            logger.debug(f"Request decomposed into: {decomposition}")
-            return decomposition
-            
-        except Exception as e:
-            logger.error(f"Failed to decompose request: {e}")
-            raise
+        Returns:
+            List of invalid role names, empty if all valid
+        """
+        valid_roles = set(self.config.keys())
+        invalid_roles = []
+        
+        for assignment in assignments:
+            if isinstance(assignment, dict):
+                role = assignment.get("role")
+                if role and role not in valid_roles:
+                    invalid_roles.append(role)
+        
+        return invalid_roles
     
     def assign_and_execute(self, user_request: str) -> List[Dict[str, Any]]:
         """
@@ -355,17 +464,42 @@ def main():
     Main entry point for the Ouroboros agent harness.
     
     Parses command-line arguments and coordinates agent execution.
+    
+    Usage:
+        python main.py [run] [--replay]
+        
+    Arguments:
+        run: Execute the coordinator (optional, runs by default)
+        --replay: Run in replay mode using recorded responses
     """
     try:
         # Parse arguments
         replay_mode = "--replay" in sys.argv
         
+        # Determine config and shared directory paths
+        # Try current directory first, then parent directory
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        # Try to find roles.json in script directory or parent
+        if os.path.exists(os.path.join(script_dir, "roles.json")):
+            roles_path = os.path.join(script_dir, "roles.json")
+            shared_dir = os.path.join(os.path.dirname(script_dir), "shared_repo")
+        else:
+            roles_path = "roles.json"
+            shared_dir = "./shared_repo"
+        
+        # Ensure directories exist
+        os.makedirs(shared_dir, exist_ok=True)
+        
+        logger.info(f"Using roles.json from: {roles_path}")
+        logger.info(f"Using shared directory: {shared_dir}")
+        
         # Initialize filesystem
         try:
             if replay_mode:
-                filesystem = ReadOnlyFileSystem(shared_dir="./shared_repo", replay_mode=True)
+                filesystem = ReadOnlyFileSystem(shared_dir=shared_dir, replay_mode=True)
             else:
-                filesystem = FileSystem(shared_dir="./shared_repo", replay_mode=False)
+                filesystem = FileSystem(shared_dir=shared_dir, replay_mode=False)
         except FileSystemError as e:
             logger.error(f"Filesystem initialization failed: {e}")
             sys.exit(1)
@@ -373,7 +507,7 @@ def main():
         # Initialize coordinator
         try:
             coordinator = CentralCoordinator(
-                config_path="roles.json",
+                config_path=roles_path,
                 filesystem=filesystem,
                 replay_mode=replay_mode,
             )
@@ -385,6 +519,7 @@ def main():
         user_request = "Build a collaborative task management app with real-time sync"
         
         # Process request
+        # Process request (fail-fast: do not auto-fallback to replay)
         results = coordinator.assign_and_execute(user_request)
         
         # Output results
