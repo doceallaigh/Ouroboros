@@ -330,6 +330,34 @@ class TestCentralCoordinator(MockedNetworkTestCase):
                 mock_agent_instance.execute_task.assert_called_once()
 
     @patch('builtins.open')
+    def test_decompose_request_with_tool_calls(self, mock_open):
+        """Should extract task assignments from tool calls in manager response."""
+        with patch('main.json.load', return_value=self.config):
+            with patch('main.Agent') as mock_agent_class:
+                mock_agent_instance = Mock()
+                # Return response with tool calls instead of JSON
+                mock_agent_instance.execute_task.return_value = (
+                    "I'll break this down into tasks:\n"
+                    "assign_task('developer', 'Create auth.py with User class', sequence=0)\n"
+                    "assign_task('auditor', 'Review the implementation', sequence=1)"
+                )
+                mock_agent_class.return_value = mock_agent_instance
+                
+                coordinator = CentralCoordinator(self.config_path, self.mock_filesystem)
+                
+                result = coordinator.decompose_request("Complex request")
+                
+                # Result should be valid JSON extracted from tool calls
+                parsed = json.loads(result)
+                self.assertIsInstance(parsed, list)
+                self.assertEqual(len(parsed), 2)
+                self.assertEqual(parsed[0]['role'], 'developer')
+                self.assertEqual(parsed[0]['task'], 'Create auth.py with User class')
+                self.assertEqual(parsed[0]['sequence'], 0)
+                self.assertEqual(parsed[1]['role'], 'auditor')
+                self.assertEqual(parsed[1]['sequence'], 1)
+
+    @patch('builtins.open')
     def test_assign_and_execute_success(self, mock_open):
         """Should execute request successfully."""
         with patch('main.json.load', return_value=self.config):

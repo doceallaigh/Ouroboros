@@ -590,3 +590,46 @@ All paths must be relative to the working directory. Absolute paths and parent d
 Exception types: PathError (invalid path), FileSizeError (>10MB), ToolError (operation failed).
 See agent_tools_guide.md for detailed examples and patterns.
 """.strip()
+
+
+def get_manager_tools_description() -> str:
+    """
+    Get a formatted description of task assignment tools for the manager role.
+    
+    Returns:
+        Multi-line string describing assignment tools and their usage
+    """
+    return """
+Available task assignment tools:
+
+Task Assignment:
+  - assign_task(role: str, task: str, sequence: int) -> dict: Assign a single task to a role
+    * role: One of 'developer', 'auditor'
+    * task: Detailed task description (include context about dependencies)
+    * sequence: Execution order (0=first, 1=second, etc.; same sequence runs in parallel)
+    * Returns: {success: bool, task_id: str}
+
+  - assign_tasks(assignments: list) -> dict: Assign multiple tasks at once
+    * assignments: List of objects with 'role', 'task', 'sequence' fields
+    * Each assignment object must have all three fields
+    * Returns: {success: bool, task_ids: list, errors: list}
+
+Examples:
+  1. Sequential tasks (execute one after another):
+     - assign_task('developer', 'Create auth.py with User class', sequence=0)
+     - assign_task('developer', 'Add login() method to User class', sequence=1)
+
+  2. Parallel tasks (execute simultaneously, then move to next sequence):
+     - assign_tasks([
+         {role: 'developer', task: 'Create module A', sequence: 0},
+         {role: 'developer', task: 'Create module B', sequence: 0},
+         {role: 'auditor', task: 'Review both modules', sequence: 1}
+       ])
+
+IMPORTANT:
+- Use assign_task() for single tasks or assign_tasks() for batches
+- Set sequence=0 for independent parallel tasks, sequence=1 for dependent tasks
+- Include ALL necessary context in task descriptions since developers cannot see each other
+- The 'auditor' role should typically come AFTER developer tasks (higher sequence number)
+- Call assign_task/assign_tasks multiple times to build your task plan
+""".strip()
