@@ -139,6 +139,10 @@ docs/
 │   └── CHANGE_LOG.md              # Detailed modification history
 │
 ├── reference/
+│   ├── CALLBACK_MECHANISM.md      # Agent callback system for inter-agent communication
+│   ├── DUPLICATE_RESPONSE_FIX.md  # Fix for duplicate manager responses
+│   ├── NETWORK_MOCKING_COMPLETE.md # Network mocking implementation
+│   ├── NETWORK_MOCKING_IMPLEMENTATION.md # Network test infrastructure
 │   ├── TROUBLESHOOTING.md         # Error codes and solutions
 │   ├── CONFIGURATION_REFERENCE.md # Configurable parameters
 │   └── API_DOCUMENTATION.md       # Function signatures and specs

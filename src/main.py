@@ -73,6 +73,7 @@ class Agent:
         # Generate name from role and instance number
         self.name = f"{self.role}{instance_number:02d}"
         self.filesystem = filesystem
+        self.callback_handler = None  # Will be set by coordinator if callbacks are needed
         
         # For developer role, inject tools description into the prompt
         if self.role == "developer":
@@ -260,6 +261,7 @@ class Agent:
                 'search_files': tools.search_files,
                 'get_file_info': tools.get_file_info,
                 'delete_file': tools.delete_file,
+                'raise_callback': self.raise_callback,  # Include callback method
                 'print': lambda *args, **kwargs: None,  # Suppress print statements
             }
             exec_locals = {}
@@ -271,7 +273,7 @@ class Agent:
                 # Count tool calls (rough estimate based on function calls in code)
                 for tool_name in ['read_file', 'write_file', 'append_file', 'edit_file', 
                                  'list_directory', 'list_all_files', 'search_files', 
-                                 'get_file_info', 'delete_file']:
+                                 'get_file_info', 'delete_file', 'raise_callback']:
                     total_calls += code_block.count(f'{tool_name}(')
                 
                 results.append({
@@ -295,6 +297,31 @@ class Agent:
             "estimated_tool_calls": total_calls,
             "results": results
         }
+    
+    def raise_callback(self, message: str, callback_type: str = "query") -> Optional[str]:
+        """
+        Raise a callback to the calling agent (e.g., request clarification, report blocker).
+        
+        Args:
+            message: The message/query to send to the caller
+            callback_type: Type of callback ('query', 'blocker', 'clarification', 'error')
+        
+        Returns:
+            Response from caller if available, None otherwise
+        """
+        if not self.callback_handler:
+            logger.warning(f"Agent {self.name} attempted callback but no handler set")
+            return None
+        
+        logger.info(f"Agent {self.name} raising {callback_type} callback: {message[:100]}")
+        
+        try:
+            response = self.callback_handler(self.name, message, callback_type)
+            logger.info(f"Callback response received for {self.name}")
+            return response
+        except Exception as e:
+            logger.error(f"Callback failed for {self.name}: {e}")
+            return None
 
 
 class CentralCoordinator:
@@ -645,12 +672,16 @@ class CentralCoordinator:
                 # Submit all tasks in this sequence
                 for i, assignment in sequence_assignments:
                     role = assignment.get("role")
-                    task_desc = assignment.get("task", "")
+                    # Pass the full assignment dict to preserve caller and other fields
+                    task_info = {
+                        "description": assignment.get("task", ""),
+                        "caller": assignment.get("caller"),
+                    }
                     
                     future = executor.submit(
                         self._execute_single_assignment,
                         role,
-                        task_desc,
+                        task_info,
                         user_request,
                     )
                     futures[i] = (future, role)
@@ -678,26 +709,58 @@ class CentralCoordinator:
         
         Args:
             role: Agent role
-            task: Task description
+            task: Task description or dict with 'description' and optional 'caller'
             original_request: Original user request
             
         Returns:
             Result dict with status and output
         """
+        # Extract task description and caller if task is a dict
+        if isinstance(task, dict):
+            task_description = task.get("description", task.get("task", ""))
+            caller = task.get("caller")
+        else:
+            task_description = task
+            caller = None
+        
         try:
             # Record task start event
             self.filesystem.record_event(
                 self.filesystem.EVENT_TASK_STARTED,
                 {
                     "role": role,
-                    "task": task[:200],  # Truncate for log
+                    "task": task_description[:200],  # Truncate for log
+                    "caller": caller,
                 }
             )
             
             agent = self._create_agent_for_role(role)
             
+            # Set callback handler if caller is specified
+            if caller:
+                def callback_handler(agent_name: str, message: str, callback_type: str) -> Optional[str]:
+                    """Handle callbacks from agent to its caller."""
+                    logger.info(f"Callback from {agent_name} to {caller}: [{callback_type}] {message[:100]}")
+                    
+                    # Record callback event
+                    self.filesystem.record_event(
+                        "AGENT_CALLBACK",
+                        {
+                            "from": agent_name,
+                            "to": caller,
+                            "type": callback_type,
+                            "message": message[:200],
+                        }
+                    )
+                    
+                    # For now, return None - future enhancement could route to actual caller agent
+                    # TODO: Implement actual routing to caller agent for response
+                    return None
+                
+                agent.callback_handler = callback_handler
+            
             result_text = agent.execute_task({
-                "user_prompt": task,
+                "user_prompt": task_description,
             })
             
             # For developer role, execute any tool calls in the response
@@ -718,7 +781,7 @@ class CentralCoordinator:
             
             result = {
                 "role": role,
-                "task": task,
+                "task": task_description,
                 "status": "completed",
                 "output": result_text,
             }

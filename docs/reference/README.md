@@ -8,6 +8,24 @@
 
 ## 📄 Documents in This Category
 
+### Callback Mechanism
+Agent callback system enabling inter-agent communication.
+- **Read if**: You need to understand how agents communicate back to their task assigners
+- **Contains**: Architecture, usage examples, event logging, and future enhancements
+- **Time**: 10-15 minutes
+
+### Duplicate Response Fix
+Fix for duplicate manager file creation issue.
+- **Read if**: You're investigating historical bug fixes or duplicate agent issues
+- **Contains**: Root cause analysis, solution implementation, and verification
+- **Time**: 5 minutes
+
+### Network Mocking
+Network test infrastructure and mocking implementation.
+- **Read if**: You're writing tests or understanding test isolation
+- **Contains**: Mock implementation, test utilities, and usage patterns
+- **Time**: 10 minutes
+
 ### API Documentation
 Function signatures, parameters, return values, exceptions, and examples.
 - **Read if**: You need precise technical specifications for a specific function/method
@@ -36,6 +54,8 @@ Low-level technical specifications and internal design patterns.
 
 ## 🎯 Quick Start
 
+**Understanding agent communication?** Check: [`CALLBACK_MECHANISM.md`](CALLBACK_MECHANISM.md)
+
 **Got an error message?** Check: [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md)
 
 **Need exact function signatures?** See: [`API_DOCUMENTATION.md`](API_DOCUMENTATION.md)
@@ -43,6 +63,8 @@ Low-level technical specifications and internal design patterns.
 **Configuring the system?** Read: [`CONFIGURATION_REFERENCE.md`](CONFIGURATION_REFERENCE.md)
 
 **Understanding internals?** Review: [`IMPLEMENTATION_DETAILS.md`](IMPLEMENTATION_DETAILS.md)
+
+**Writing tests?** See: [`NETWORK_MOCKING_COMPLETE.md`](NETWORK_MOCKING_COMPLETE.md)
 
 ---
 

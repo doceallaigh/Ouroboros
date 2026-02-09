@@ -130,7 +130,11 @@ class TestAgent(MockedNetworkTestCase):
                 task = {"user_prompt": "Do something"}
                 agent.execute_task(task)
                 
-                self.mock_filesystem.write_data.assert_called_with("developer01", "Output")
+                # Verify append_response_file was called (write_data was removed)
+                self.mock_filesystem.append_response_file.assert_called_once()
+                # Check the response content (4th argument)
+                call_args = self.mock_filesystem.append_response_file.call_args[0]
+                self.assertEqual(call_args[3], "Output")  # response is 4th arg
 
     def test_execute_task_records_event(self):
         """Should record timeout retry events."""
@@ -499,7 +503,11 @@ class TestCoordinatorWithReplayMode(MockedNetworkTestCase):
     def test_load_replay_data(self, mock_open):
         """Should load replay data."""
         with patch('main.json.load', return_value=self.config):
-            self.mock_filesystem.get_recorded_output.return_value = "Recorded output"
+            # Mock get_recorded_outputs_in_order to return a list of tuples
+            self.mock_filesystem.get_recorded_outputs_in_order.return_value = [
+                ("2026-02-08T10:00:00", "Recorded output 1"),
+                ("2026-02-08T10:01:00", "Recorded output 2")
+            ]
             
             coordinator = CentralCoordinator(
                 self.config_path,
@@ -509,8 +517,8 @@ class TestCoordinatorWithReplayMode(MockedNetworkTestCase):
             
             data = coordinator._load_replay_data("test_agent")
             
-            self.assertEqual(data, "Recorded output")
-            self.mock_filesystem.get_recorded_output.assert_called_once_with("test_agent")
+            self.assertEqual(data, "Recorded output 1")
+            self.mock_filesystem.get_recorded_outputs_in_order.assert_called_once_with("test_agent")
 
     @patch('builtins.open')
     def test_decompose_request_no_duplicate_managers(self, mock_open):
@@ -548,6 +556,78 @@ class TestCoordinatorWithReplayMode(MockedNetworkTestCase):
                     # Even if it fails, still verify only one manager was created
                     self.assertEqual(manager_creation_count, 1,
                                    "Should create only ONE manager agent, not multiple during retries")
+
+
+class TestCallbackMechanism(MockedNetworkTestCase):
+    """Test cases for agent callback mechanism."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.config = {
+            "role": "developer",
+            "system_prompt": "You are a developer",
+            "model": "gpt-3.5",
+            "temperature": 0.7,
+            "max_tokens": 1000,
+        }
+        self.config_path = "test_config.json"
+        self.mock_channel_factory = Mock()
+        self.mock_filesystem = Mock()
+        self.mock_channel = Mock()
+        self.mock_channel_factory.create_channel.return_value = self.mock_channel
+
+    @patch('builtins.open')
+    def test_callback_handler_set_when_caller_specified(self, mock_open):
+        """Should set callback handler when task includes caller field."""
+        with patch('main.json.load', return_value=self.config):
+            coordinator = CentralCoordinator(self.config_path, self.mock_filesystem)
+            
+            # Track callback handler assignments
+            callback_set = False
+            original_create = coordinator._create_agent_for_role
+            
+            def track_callback_handler(role):
+                agent = original_create(role)
+                nonlocal callback_set
+                if agent.callback_handler is not None:
+                    callback_set = True
+                return agent
+            
+            coordinator._create_agent_for_role = track_callback_handler
+            
+            # Execute task with caller specified
+            task = {
+                "description": "Test task",
+                "caller": "manager"
+            }
+            
+            try:
+                with patch.object(coordinator, '_create_agent_for_role') as mock_create:
+                    mock_agent = Mock()
+                    mock_agent.execute_task.return_value = "Test output"
+                    mock_agent.execute_tools_from_response.return_value = {"tools_executed": False}
+                    mock_agent.name = "developer01"
+                    mock_create.return_value = mock_agent
+                    
+                    coordinator._execute_single_assignment("developer", task, "Test request")
+                    
+                    # Verify callback_handler was set
+                    self.assertIsNotNone(mock_agent.callback_handler)
+            except Exception as e:
+                self.fail(f"Callback test raised unexpected exception: {e}")
+
+    def test_raise_callback_method_exists(self):
+        """Should have raise_callback method on Agent class."""
+        agent = Agent(self.config, self.mock_channel_factory, self.mock_filesystem, instance_number=1)
+        self.assertTrue(hasattr(agent, 'raise_callback'))
+        self.assertTrue(callable(agent.raise_callback))
+
+    def test_raise_callback_without_handler(self):
+        """Should handle raise_callback gracefully when no handler set."""
+        agent = Agent(self.config, self.mock_channel_factory, self.mock_filesystem, instance_number=1)
+        # Should return None and not raise exception
+        result = agent.raise_callback("Test message", "query")
+        self.assertIsNone(result)
 
 
 class TestOrganizationError(MockedNetworkTestCase):
