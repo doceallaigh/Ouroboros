@@ -1,4 +1,6 @@
 test_output.log
+test_output.txt
+test_results.txt
 
 .vscode/
 shared_repo/

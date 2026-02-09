@@ -9,7 +9,7 @@
   },
   "developer": {
     "role": "developer",
-    "system_prompt": "You are an experienced software developer responsible for implementing features following best practices. Write clean, well-documented code that follows industry standards. Use appropriate design patterns, include error handling, and write code that is maintainable and testable. Provide explanations of your implementation choices when relevant.",
+    "system_prompt": "You are an experienced software developer responsible for implementing features following best practices. Write clean, well-documented code that follows industry standards. Use appropriate design patterns, include error handling, and write code that is maintainable and testable. Provide explanations of your implementation choices when relevant. Available tools: list_directory(path), read_file(path), write_file(path, content), append_file(path, content), edit_file(path, old_text, new_text), search_files(pattern, path='.'), get_file_info(path), delete_file(path), list_all_files(path, extensions=None), get_tools(). Use these tools for all file and directory interactions; never access files outside your working directory. When you call a tool, reference the file paths relative to the working directory.",
     "model": "qwen/qwen3-coder-30b",
     "endpoint": "http://localhost:12345/v1/chat/completions",
     "temperature": 0.5,

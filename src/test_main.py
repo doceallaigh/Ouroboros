@@ -53,7 +53,15 @@ class TestAgent(unittest.TestCase):
         """Should create channel using factory."""
         agent = Agent(self.config, self.mock_channel_factory, self.mock_filesystem, instance_number=1)
         
-        self.mock_channel_factory.create_channel.assert_called_once_with(self.config)
+        # Verify create_channel was called with a config
+        self.mock_channel_factory.create_channel.assert_called_once()
+        # Get the actual config that was passed
+        called_config = self.mock_channel_factory.create_channel.call_args[0][0]
+        # For developer role, verify tools were injected into the prompt
+        if self.config.get("role") == "developer":
+            self.assertIn("Available tools", called_config.get("system_prompt", ""))
+            # Verify original config is not modified
+            self.assertNotIn("Available tools", self.config.get("system_prompt", ""))
 
     def test_execute_task_success(self):
         """Should execute task successfully."""

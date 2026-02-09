@@ -555,3 +555,38 @@ def get_tools(working_dir: str = DEFAULT_WORKING_DIR) -> AgentTools:
         AgentTools instance
     """
     return AgentTools(working_dir)
+
+
+def get_tools_description() -> str:
+    """
+    Get a formatted description of all available tools for injection into agent prompts.
+    
+    Returns:
+        Multi-line string describing all tools and their signatures
+    """
+    return """
+Available tools (call these methods in your implementation):
+
+File Reading:
+  - read_file(path: str) -> str: Read file contents
+  - get_file_info(path: str) -> dict: Get file metadata (size, type, lines, etc.)
+
+File Writing:
+  - write_file(path: str, content: str) -> dict: Create or overwrite file (auto-creates directories)
+  - append_file(path: str, content: str) -> dict: Append to file or create if missing
+  - edit_file(path: str, old_text: str, new_text: str) -> dict: Replace text in file
+
+Directory Operations:
+  - list_directory(path: str) -> dict: List immediate contents (non-recursive)
+  - list_all_files(path: str, extensions: list = None) -> dict: Recursively list files with optional extension filter
+
+Search:
+  - search_files(pattern: str, path: str = ".") -> dict: Search with glob patterns (supports ** for recursion)
+
+Deletion:
+  - delete_file(path: str) -> dict: Delete a file
+
+All paths must be relative to the working directory. Absolute paths and parent directory traversal (../) are blocked for security.
+Exception types: PathError (invalid path), FileSizeError (>10MB), ToolError (operation failed).
+See agent_tools_guide.md for detailed examples and patterns.
+""".strip()
