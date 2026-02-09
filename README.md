@@ -54,23 +54,45 @@ python main.py --replay
 
 ---
 
-## 📚 Documentation
+## 📚 Documentation Structure
 
-We've created comprehensive documentation to help you understand and use the system:
+Documentation is organized by audience to make it easy to find what you need.
 
-| Document | Purpose | Time |
-|----------|---------|------|
-| **[EXECUTIVE_SUMMARY.md](EXECUTIVE_SUMMARY.md)** | Overview of refactoring and status | 5 min |
-| **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** | Module reference and common patterns | 10 min |
-| **[ARCHITECTURE.md](ARCHITECTURE.md)** | System design and data flows | 20 min |
-| **[BEST_PRACTICES.md](BEST_PRACTICES.md)** | Usage patterns and advanced topics | 30 min |
-| **[DOCUMENTATION.md](DOCUMENTATION.md)** | Index and navigation guide | 5 min |
-| **[REFACTORING_SUMMARY.md](REFACTORING_SUMMARY.md)** | Responsibilities and improvements | 10 min |
-| **[REFACTORING_CHANGES.md](REFACTORING_CHANGES.md)** | Detailed changes and migration guide | 15 min |
-| **[VERIFICATION_CHECKLIST.md](VERIFICATION_CHECKLIST.md)** | QA results and verification | 10 min |
-| **[CHANGE_LOG.md](CHANGE_LOG.md)** | Complete list of all changes | 15 min |
+### 👥 For Everyone: Find Your Path
 
-**→ [Start with QUICK_REFERENCE.md](QUICK_REFERENCE.md) for the fastest path to understanding the system!**
+**I'm a Project Manager/Stakeholder**  
+→ Start here: [docs/human/EXECUTIVE_SUMMARY.md](docs/human/EXECUTIVE_SUMMARY.md)
+
+**I'm an AI Agent**  
+→ Start here: [docs/agents/AGENT_TOOLS_GUIDE.md](docs/agents/AGENT_TOOLS_GUIDE.md)
+
+**I'm a Developer**  
+→ Start here: [docs/development/ARCHITECTURE.md](docs/development/ARCHITECTURE.md)
+
+**I need to troubleshoot or find specifications**  
+→ Check: [docs/reference/](docs/reference/)
+
+### 📂 Documentation Organization
+
+All documentation is now organized in the `docs/` directory by audience:
+
+- **[docs/human/](docs/human/)** - For project managers and stakeholders
+  - Executive summaries, status reports, and operational guides
+  
+- **[docs/agents/](docs/agents/)** - For AI agents executing tasks
+  - Tools reference, capabilities, and best practices
+  
+- **[docs/development/](docs/development/)** - For developers
+  - Architecture, refactoring details, and verification procedures
+  
+- **[docs/reference/](docs/reference/)** - For technical reference
+  - API specifications, configuration, and troubleshooting
+
+### 🗂️ Master Index
+
+**[→ See docs/INDEX.md for complete navigation guide](docs/INDEX.md)**
+
+This comprehensive index helps you find exactly what you need based on your role and task.
 
 ---
 

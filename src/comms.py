@@ -153,7 +153,7 @@ class Channel(ABC):
         pass
     
     @abstractmethod
-    async def receive_message(self) -> "tuple[HTTPXResponse, Optional[int]]":
+    async def receive_message(self) -> HTTPXResponse:
         """
         Receive a message response through this channel.
         
@@ -186,8 +186,8 @@ class APIChannel(Channel):
         except ValidationError as e:
             raise CommunicationError(f"Invalid message: {e}")
     
-    async def receive_message(self) -> "tuple[HTTPXResponse, Optional[int]]":
-        """Send queued message and receive response, returning (response, ticks)."""
+    async def receive_message(self) -> HTTPXResponse:
+        """Send queued message and receive response. Stores `last_ticks` attribute on the channel."""
         if not self.pending_replies:
             raise APIError("No pending messages to send")
 
@@ -202,8 +202,10 @@ class APIChannel(Channel):
                 json=payload,
                 timeout=self.timeout,
             )
+            # store ticks for caller to retrieve if needed
+            self.last_ticks = ticks
             logger.debug(f"Received response with status {response.status_code} (ticks={ticks})")
-            return response, ticks
+            return response
         except asyncio.TimeoutError:
             raise APIError(f"API request timed out after {self.timeout}s")
         except Exception as e:
@@ -236,8 +238,8 @@ class ReplayChannel(Channel):
         logger.debug(f"Replay mode - registered send for {self.agent_name} with ticks={ticks}")
         return ticks
     
-    async def receive_message(self) -> "tuple[HTTPXResponse, Optional[int]]":
-        """Retrieve recorded response and return (response, ticks)."""
+    async def receive_message(self) -> HTTPXResponse:
+        """Retrieve recorded response. Stores `last_ticks` on the channel if available."""
         try:
             raw = self.replay_data_loader(self.agent_name) or ""
             raw = sanitize_output(raw)
@@ -250,8 +252,9 @@ class ReplayChannel(Channel):
             ticks = None
             if self.pending_replies:
                 _, ticks = self.pending_replies.pop(0)
+            self.last_ticks = ticks
             logger.debug(f"Loaded replay data for {self.agent_name} (ticks={ticks})")
-            return resp, ticks
+            return resp
         except Exception as e:
             raise APIError(f"Failed to load replay data: {e}")
 

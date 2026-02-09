@@ -19,6 +19,7 @@ from typing import Dict, List, Any, Optional
 
 from comms import ChannelFactory, CommunicationError, APIError, extract_content_from_response
 from filesystem import FileSystem, ReadOnlyFileSystem, FileSystemError
+from agent_tools import get_tools_description
 
 # Configure logging
 logging.basicConfig(
@@ -66,14 +67,22 @@ class Agent:
         Raises:
             OrganizationError: If agent initialization fails
         """
-        self.config = config
-        self.role = config.get("role", "unknown")
+        self.config = config.copy()  # Copy to avoid modifying original
+        self.role = self.config.get("role", "unknown")
         # Generate name from role and instance number
         self.name = f"{self.role}{instance_number:02d}"
         self.filesystem = filesystem
         
+        # For developer role, inject tools description into the prompt
+        if self.role == "developer":
+            tools_desc = get_tools_description()
+            original_prompt = self.config.get("system_prompt", "")
+            # Append tools description if not already present
+            if "Available tools" not in original_prompt:
+                self.config["system_prompt"] = f"{original_prompt}\n\n{tools_desc}"
+        
         try:
-            self.channel = channel_factory.create_channel(config)
+            self.channel = channel_factory.create_channel(self.config)
             logger.info(f"Initialized agent: {self.name} (role: {self.role})")
         except Exception as e:
             raise OrganizationError(f"Failed to initialize agent {self.name}: {e}")
@@ -131,11 +140,16 @@ class Agent:
                 except Exception:
                     logger.exception("Failed to create query file")
 
-                # Receive response (channel returns (response, ticks))
-                response, returned_ticks = asyncio.run(self.channel.receive_message())
+                # Receive response (channel may return response or set channel.last_ticks)
+                resp_result = asyncio.run(self.channel.receive_message())
+                if isinstance(resp_result, tuple):
+                    response, returned_ticks = resp_result
+                else:
+                    response = resp_result
+                    returned_ticks = getattr(self.channel, 'last_ticks', None)
                 if returned_ticks is None:
                     returned_ticks = ticks
-                
+
                 # Extract and store result
                 result = extract_content_from_response(response)
 
