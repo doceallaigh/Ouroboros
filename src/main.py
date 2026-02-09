@@ -19,7 +19,8 @@ from typing import Dict, List, Any, Optional
 
 from comms import ChannelFactory, CommunicationError, APIError, extract_content_from_response
 from filesystem import FileSystem, ReadOnlyFileSystem, FileSystemError
-from agent_tools import get_tools_description
+from agent_tools import get_tools_description, AgentTools
+import re
 
 # Configure logging
 logging.basicConfig(
@@ -216,6 +217,84 @@ class Agent:
         error_msg = f"Agent {self.name} task execution failed after {self.MAX_RETRIES} retries: {str(last_error)}"
         logger.error(error_msg)
         raise OrganizationError(error_msg)
+    
+    def execute_tools_from_response(self, response: str, working_dir: str = ".") -> Dict[str, Any]:
+        """
+        Extract and execute tool calls from an agent's response.
+        
+        Looks for Python code blocks containing tool calls and executes them.
+        
+        Args:
+            response: Agent's text response potentially containing tool calls
+            working_dir: Working directory for tool operations
+            
+        Returns:
+            Dict with execution results and summary
+        """
+        # Initialize agent tools
+        tools = AgentTools(working_dir=working_dir)
+        
+        # Extract Python code blocks from response
+        code_blocks = re.findall(r'```python\n(.*?)\n```', response, re.DOTALL)
+        
+        if not code_blocks:
+            logger.debug(f"No Python code blocks found in response from {self.name}")
+            return {
+                "tools_executed": False,
+                "message": "No tool calls found in response"
+            }
+        
+        results = []
+        total_calls = 0
+        
+        # Execute each code block
+        for code_block in code_blocks:
+            # Create a safe execution environment with tools available
+            exec_globals = {
+                'read_file': tools.read_file,
+                'write_file': tools.write_file,
+                'append_file': tools.append_file,
+                'edit_file': tools.edit_file,
+                'list_directory': tools.list_directory,
+                'list_all_files': tools.list_all_files,
+                'search_files': tools.search_files,
+                'get_file_info': tools.get_file_info,
+                'delete_file': tools.delete_file,
+                'print': lambda *args, **kwargs: None,  # Suppress print statements
+            }
+            exec_locals = {}
+            
+            try:
+                # Execute the code
+                exec(code_block, exec_globals, exec_locals)
+                
+                # Count tool calls (rough estimate based on function calls in code)
+                for tool_name in ['read_file', 'write_file', 'append_file', 'edit_file', 
+                                 'list_directory', 'list_all_files', 'search_files', 
+                                 'get_file_info', 'delete_file']:
+                    total_calls += code_block.count(f'{tool_name}(')
+                
+                results.append({
+                    "success": True,
+                    "code_executed": len(code_block),
+                })
+                logger.info(f"Agent {self.name} executed tools successfully")
+                
+            except Exception as e:
+                logger.error(f"Tool execution failed for {self.name}: {e}")
+                results.append({
+                    "success": False,
+                    "error": str(e),
+                    "code": code_block[:200]  # Include snippet for debugging
+                })
+        
+        return {
+            "tools_executed": True,
+            "code_blocks_found": len(code_blocks),
+            "code_blocks_executed": len([r for r in results if r.get("success")]),
+            "estimated_tool_calls": total_calls,
+            "results": results
+        }
 
 
 class CentralCoordinator:
@@ -621,21 +700,33 @@ class CentralCoordinator:
                 "user_prompt": task,
             })
             
+            # For developer role, execute any tool calls in the response
+            tool_results = None
+            if role == "developer":
+                tool_results = agent.execute_tools_from_response(result_text, working_dir=self.filesystem.working_dir)
+            
             # Record task completion event
             self.filesystem.record_event(
                 self.filesystem.EVENT_TASK_COMPLETED,
                 {
                     "role": role,
                     "output_length": len(result_text),
+                    "tools_executed": tool_results.get("tools_executed", False) if tool_results else False,
+                    "tool_calls": tool_results.get("estimated_tool_calls", 0) if tool_results else 0,
                 }
             )
             
-            return {
+            result = {
                 "role": role,
                 "task": task,
                 "status": "completed",
                 "output": result_text,
             }
+            
+            if tool_results:
+                result["tool_execution"] = tool_results
+            
+            return result
             
         except Exception as e:
             # Record task failure event
@@ -657,11 +748,18 @@ def main():
     Parses command-line arguments and coordinates agent execution.
     
     Usage:
-        python main.py [run] [--replay]
+        python main.py ["user request"] [--replay]
+        python main.py run ["user request"] [--replay]
         
     Arguments:
+        "user request": Optional user request string (default: "Build a simple Hello World application")
         run: Execute the coordinator (optional, runs by default)
         --replay: Run in replay mode using recorded responses
+        
+    Examples:
+        python main.py "Build a Hello World app"
+        python main.py run "Create a REST API" --replay
+        python main.py --replay
     """
     try:
         # Parse arguments
@@ -706,8 +804,18 @@ def main():
             logger.error(f"Coordinator initialization failed: {e}")
             sys.exit(1)
         
-        # Example request (can be replaced with user input)
-        user_request = "Build a collaborative task management app with real-time sync"
+        # Get user request from command line or use default
+        if len(sys.argv) > 1 and sys.argv[1] not in ["run", "--replay"]:
+            # First positional argument is the user request
+            user_request = sys.argv[1]
+        elif len(sys.argv) > 2 and sys.argv[2] not in ["--replay"]:
+            # Second argument if first was "run"
+            user_request = sys.argv[2]
+        else:
+            # Default request
+            user_request = "Build a simple Hello World application"
+        
+        logger.info(f"User Request: {user_request}")
         
         # Process request
         # Process request (fail-fast: do not auto-fallback to replay)
