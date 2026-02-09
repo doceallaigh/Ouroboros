@@ -8,6 +8,7 @@ Responsibilities:
 - Application lifecycle management
 """
 
+import argparse
 import asyncio
 import json
 import logging
@@ -809,35 +810,100 @@ def main():
     Main entry point for the Ouroboros agent harness.
     
     Parses command-line arguments and coordinates agent execution.
-    
-    Usage:
-        python main.py ["user request"] [--replay]
-        python main.py run ["user request"] [--replay]
-        
-    Arguments:
-        "user request": Optional user request string (default: "Build a simple Hello World application")
-        run: Execute the coordinator (optional, runs by default)
-        --replay: Run in replay mode using recorded responses
-        
-    Examples:
-        python main.py "Build a Hello World app"
-        python main.py run "Create a REST API" --replay
-        python main.py --replay
     """
+    parser = argparse.ArgumentParser(
+        prog='ouroboros',
+        description='Ouroboros - Multi-Agent Task Coordination System',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s "Build a Hello World app"
+      Execute a user request in normal mode
+      
+  %(prog)s "Create a REST API server" --replay
+      Execute using replay mode (uses recorded responses)
+      
+  %(prog)s --replay
+      Run default task in replay mode
+      
+  %(prog)s
+      Run default task: "Build a simple Hello World application"
+
+Features:
+  - Multi-agent collaboration with manager and developer roles
+  - Task decomposition and parallel execution
+  - Event sourcing for audit trail and replay
+  - Tool-based file operations within sandboxed workspace
+  - Callback mechanism for agent-to-agent communication
+
+Directory Structure:
+  roles.json       Agent role configurations (system prompts, models)
+  shared_repo/     Session directories with agent outputs and events
+  
+For more information, see documentation in docs/
+        """
+    )
+    
+    parser.add_argument(
+        'request',
+        nargs='?',
+        default='Build a simple Hello World application',
+        help='User request describing the task to execute (default: "Build a simple Hello World application")'
+    )
+    
+    parser.add_argument(
+        '--replay',
+        action='store_true',
+        help='Run in replay mode using previously recorded responses instead of calling LLM'
+    )
+    
+    parser.add_argument(
+        '--config',
+        metavar='PATH',
+        default=None,
+        help='Path to roles.json configuration file (default: auto-detect from script location)'
+    )
+    
+    parser.add_argument(
+        '--shared-dir',
+        metavar='PATH',
+        default=None,
+        help='Path to shared repository directory for session outputs (default: ../shared_repo or ./shared_repo)'
+    )
+    
+    parser.add_argument(
+        '--verbose', '-v',
+        action='store_true',
+        help='Enable verbose logging output'
+    )
+    
+    args = parser.parse_args()
+    
+    # Adjust logging level if verbose
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+        logger.info("Verbose logging enabled")
+    
     try:
-        # Parse arguments
-        replay_mode = "--replay" in sys.argv
+        replay_mode = args.replay
         
         # Determine config and shared directory paths
-        # Try current directory first, then parent directory
         script_dir = os.path.dirname(os.path.abspath(__file__))
         
-        # Try to find roles.json in script directory or parent
-        if os.path.exists(os.path.join(script_dir, "roles.json")):
+        # Use provided config path or auto-detect
+        if args.config:
+            roles_path = args.config
+        elif os.path.exists(os.path.join(script_dir, "roles.json")):
             roles_path = os.path.join(script_dir, "roles.json")
-            shared_dir = os.path.join(os.path.dirname(script_dir), "shared_repo")
         else:
             roles_path = "roles.json"
+        
+        # Use provided shared directory or auto-detect
+        if args.shared_dir:
+            shared_dir = args.shared_dir
+        elif os.path.exists(os.path.join(script_dir, "roles.json")):
+            shared_dir = os.path.join(os.path.dirname(script_dir), "shared_repo")
+        else:
             shared_dir = "./shared_repo"
         
         # Ensure directories exist
@@ -867,16 +933,8 @@ def main():
             logger.error(f"Coordinator initialization failed: {e}")
             sys.exit(1)
         
-        # Get user request from command line or use default
-        if len(sys.argv) > 1 and sys.argv[1] not in ["run", "--replay"]:
-            # First positional argument is the user request
-            user_request = sys.argv[1]
-        elif len(sys.argv) > 2 and sys.argv[2] not in ["--replay"]:
-            # Second argument if first was "run"
-            user_request = sys.argv[2]
-        else:
-            # Default request
-            user_request = "Build a simple Hello World application"
+        # Get user request from parsed arguments
+        user_request = args.request
         
         logger.info(f"User Request: {user_request}")
         
