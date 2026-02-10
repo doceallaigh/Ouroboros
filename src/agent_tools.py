@@ -21,6 +21,7 @@ import logging
 import subprocess
 import json
 import sys
+import re
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 
@@ -60,14 +61,32 @@ class AgentTools:
     All operations are restricted to a designated working directory
     to prevent directory traversal attacks.
     """
+    TOOL_METHODS = {
+        "list_directory",
+        "read_file",
+        "write_file",
+        "append_file",
+        "edit_file",
+        "search_files",
+        "get_file_info",
+        "delete_file",
+        "list_all_files",
+        "search_package",
+        "install_package",
+        "check_package_installed",
+        "list_installed_packages",
+        "confirm_task_complete",
+        "audit_files",
+    }
     
-    def __init__(self, working_dir: str = DEFAULT_WORKING_DIR, max_file_size: int = DEFAULT_MAX_FILE_SIZE):
+    def __init__(self, working_dir: str = DEFAULT_WORKING_DIR, max_file_size: int = DEFAULT_MAX_FILE_SIZE, allowed_tools: Optional[List[str]] = None):
         """
         Initialize agent tools.
         
         Args:
             working_dir: Root directory for all operations (default: current directory)
             max_file_size: Maximum file size in bytes for read operations
+            allowed_tools: Optional list of tool names allowed for the role
             
         Raises:
             ToolError: If working directory doesn't exist
@@ -77,7 +96,18 @@ class AgentTools:
         
         self.working_dir = os.path.abspath(working_dir)
         self.max_file_size = max_file_size
+        self.allowed_tools = set(allowed_tools) if allowed_tools is not None else None
         logger.info(f"Initialized AgentTools with working_dir: {self.working_dir}")
+
+    def __getattribute__(self, name: str):
+        tool_methods = object.__getattribute__(self, "TOOL_METHODS")
+        if name in tool_methods:
+            allowed_tools = object.__getattribute__(self, "allowed_tools")
+            if allowed_tools is not None and name not in allowed_tools:
+                def _blocked(*_args, **_kwargs):
+                    raise ToolError(f"Tool not allowed for this role: {name}")
+                return _blocked
+        return object.__getattribute__(self, name)
     
     def _validate_path(self, path: str) -> str:
         """
@@ -294,23 +324,21 @@ class AgentTools:
         except Exception as e:
             raise ToolError(f"Failed to append to file {path}: {e}")
     
-    def edit_file(self, path: str, old_text: str, new_text: str, 
-                  encoding: str = "utf-8") -> Dict[str, Any]:
+    def edit_file(self, path: str, diff: str, encoding: str = "utf-8") -> Dict[str, Any]:
         """
-        Edit file by replacing text.
+        Edit file by applying a unified diff.
         
         Args:
             path: File path (relative to working_dir)
-            old_text: Text to find and replace
-            new_text: Replacement text
+            diff: Unified diff string (single-file) to apply
             encoding: Text encoding (default: utf-8)
             
         Returns:
-            Dictionary with path, replacements count, and result
+            Dictionary with path, hunks applied, and result
             
         Raises:
             PathError: If path is invalid
-            ToolError: If edit fails
+            ToolError: If patch fails or does not match file contents
         """
         try:
             file_path = self._validate_path(path)
@@ -320,39 +348,115 @@ class AgentTools:
             
             # Read file
             with open(file_path, 'r', encoding=encoding) as f:
-                content = f.read()
+                original_lines = f.read().splitlines(keepends=True)
             
-            # Count replacements
-            replacements = content.count(old_text)
+            new_lines, stats = self._apply_unified_diff(original_lines, diff)
             
-            if replacements == 0:
-                logger.warning(f"No matches found in {path} for edit")
+            if not stats["hunks"]:
                 return {
                     "path": path,
-                    "replacements": 0,
+                    "hunks": 0,
+                    "added": 0,
+                    "removed": 0,
                     "success": False,
-                    "message": "Text not found",
+                    "message": "No hunks applied",
                 }
-            
-            # Perform replacement
-            new_content = content.replace(old_text, new_text)
             
             # Write back
             with open(file_path, 'w', encoding=encoding) as f:
-                f.write(new_content)
+                f.write("".join(new_lines))
             
-            logger.info(f"Edited file: {path} ({replacements} replacements)")
+            logger.info(
+                f"Edited file: {path} (hunks={stats['hunks']}, added={stats['added']}, removed={stats['removed']})"
+            )
             
             return {
                 "path": path,
-                "replacements": replacements,
+                "hunks": stats["hunks"],
+                "added": stats["added"],
+                "removed": stats["removed"],
                 "success": True,
             }
         
         except PathError:
             raise
+        except ToolError:
+            raise
         except Exception as e:
             raise ToolError(f"Failed to edit file {path}: {e}")
+
+    def _apply_unified_diff(self, original_lines: List[str], diff: str) -> (List[str], Dict[str, int]):
+        """
+        Apply a unified diff to a list of lines.
+        
+        Args:
+            original_lines: Original file lines with newline characters
+            diff: Unified diff string
+            
+        Returns:
+            Tuple of (new_lines, stats)
+            stats includes: hunks, added, removed
+        """
+        diff_lines = diff.splitlines()
+        output_lines: List[str] = []
+        orig_index = 0
+        hunks = 0
+        added = 0
+        removed = 0
+        
+        i = 0
+        while i < len(diff_lines):
+            line = diff_lines[i]
+            
+            if line.startswith("diff ") or line.startswith("---") or line.startswith("+++"):
+                i += 1
+                continue
+            
+            if line.startswith("@@"):
+                match = re.match(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", line)
+                if not match:
+                    raise ToolError(f"Invalid diff hunk header: {line}")
+                orig_start = int(match.group(1))
+                
+                # Append unchanged lines before the hunk
+                while orig_index < orig_start - 1:
+                    output_lines.append(original_lines[orig_index])
+                    orig_index += 1
+                
+                i += 1
+                while i < len(diff_lines) and not diff_lines[i].startswith("@@"):
+                    hunk_line = diff_lines[i]
+                    if hunk_line.startswith(" "):
+                        expected = hunk_line[1:]
+                        if orig_index >= len(original_lines) or original_lines[orig_index].rstrip("\n") != expected:
+                            raise ToolError("Diff context does not match file contents")
+                        output_lines.append(original_lines[orig_index])
+                        orig_index += 1
+                    elif hunk_line.startswith("-"):
+                        expected = hunk_line[1:]
+                        if orig_index >= len(original_lines) or original_lines[orig_index].rstrip("\n") != expected:
+                            raise ToolError("Diff removal does not match file contents")
+                        orig_index += 1
+                        removed += 1
+                    elif hunk_line.startswith("+"):
+                        output_lines.append(hunk_line[1:] + "\n")
+                        added += 1
+                    elif hunk_line.startswith("\\"):
+                        if output_lines:
+                            output_lines[-1] = output_lines[-1].rstrip("\n")
+                    else:
+                        raise ToolError(f"Invalid diff line: {hunk_line}")
+                    i += 1
+                
+                hunks += 1
+                continue
+            
+            i += 1
+        
+        # Append remaining original lines
+        output_lines.extend(original_lines[orig_index:])
+        
+        return output_lines, {"hunks": hunks, "added": added, "removed": removed}
     
     def search_files(self, pattern: str, path: str = ".") -> Dict[str, Any]:
         """
@@ -984,31 +1088,119 @@ class AgentTools:
             return False
         
         return True
+    
+    def confirm_task_complete(self, summary: str = "", deliverables: List[str] = None) -> Dict[str, Any]:
+        """
+        Confirm that the assigned task is complete.
+        
+        Call this when you have completed all work for the assigned task.
+        Provide a summary and list any deliverables created.
+        
+        Args:
+            summary: Brief summary of what was completed (optional)
+            deliverables: List of files or outputs created (optional)
+            
+        Returns:
+            Confirmation dict with completion status
+        """
+        from datetime import datetime, timezone
+        
+        if deliverables is None:
+            deliverables = []
+        
+        return {
+            "status": "complete",
+            "task_complete": True,
+            "summary": summary,
+            "deliverables": deliverables,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    
+    def audit_files(self, file_paths: List[str], description: str = "", focus_areas: List[str] = None, produced_files: List[str] = None) -> Dict[str, Any]:
+        """
+        Request an auditor to review specific files.
+        
+        Use this to trigger a direct audit of files you've created or modified,
+        rather than waiting for the manager to assign an audit task.
+        
+        RESTRICTION: Can only audit files that have been produced during this task execution.
+        Audit requests must come AFTER the files have been created/modified with write_file,
+        append_file, or edit_file calls.
+        
+        Args:
+            file_paths: List of relative file paths to audit
+            description: Description of what to audit and why (e.g., "Check for security issues", "Verify implementation matches spec")
+            focus_areas: Optional list of specific areas to focus on (e.g., ["error_handling", "performance", "security"])
+            produced_files: Internal parameter - list of files produced during this task execution
+            
+        Returns:
+            Audit request dict with files and audit details
+            
+        Raises:
+            ToolError: If auditing files that haven't been produced yet
+        """
+        from datetime import datetime, timezone
+        
+        if focus_areas is None:
+            focus_areas = []
+        
+        if produced_files is None:
+            produced_files = []
+        
+        # Validate that audit_files only references files that were produced
+        unproduced_files = [f for f in file_paths if f not in produced_files]
+        if unproduced_files:
+            error_msg = f"Cannot audit files that haven't been produced: {unproduced_files}. Only audit files you created/modified with write_file, append_file, or edit_file."
+            logger.error(error_msg)
+            raise ToolError(error_msg)
+        
+        # Validate that files exist
+        validated_files = []
+        for file_path in file_paths:
+            try:
+                abs_path = self._validate_path(file_path)
+                if os.path.isfile(abs_path):
+                    validated_files.append(file_path)
+                else:
+                    logger.warning(f"File not found for audit: {file_path}")
+            except PathError as e:
+                logger.warning(f"Invalid path for audit: {file_path} - {e}")
+        
+        return {
+            "status": "audit_requested",
+            "audit_type": "file_review",
+            "files": validated_files,
+            "invalid_files": [f for f in file_paths if f not in validated_files],
+            "description": description,
+            "focus_areas": focus_areas,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
 
 
 # Helper functions for direct use
-def get_tools(working_dir: str = DEFAULT_WORKING_DIR) -> AgentTools:
+def get_tools(working_dir: str = DEFAULT_WORKING_DIR, allowed_tools: Optional[List[str]] = None) -> AgentTools:
     """
     Factory function to create an AgentTools instance.
 
     
     Args:
         working_dir: Root directory for operations
+        allowed_tools: Optional list of tool names allowed for the role
         
     Returns:
         AgentTools instance
     """
-    return AgentTools(working_dir)
+    return AgentTools(working_dir, allowed_tools=allowed_tools)
 
 
-def get_tools_description() -> str:
+def get_tools_description(allowed_tools: Optional[List[str]] = None) -> str:
     """
     Get a formatted description of all available tools for injection into agent prompts.
     
     Returns:
         Multi-line string describing all tools and their signatures
     """
-    return """
+    description = """
 Available tools (call these methods in your implementation):
 
 File Reading:
@@ -1018,7 +1210,7 @@ File Reading:
 File Writing:
   - write_file(path: str, content: str) -> dict: Create or overwrite file (auto-creates directories)
   - append_file(path: str, content: str) -> dict: Append to file or create if missing
-  - edit_file(path: str, old_text: str, new_text: str) -> dict: Replace text in file
+    - edit_file(path: str, diff: str) -> dict: Apply unified diff to file
 
 Directory Operations:
   - list_directory(path: str) -> dict: List immediate contents (non-recursive)
@@ -1036,6 +1228,16 @@ Package Management:
   - check_package_installed(name: str, language: str = "python") -> dict: Check if a package is installed and get version
   - list_installed_packages(language: str = "python") -> dict: List all installed packages for a language
 
+Task Completion:
+  - confirm_task_complete(summary: str = "", deliverables: list = None) -> dict: Confirm task is complete and provide summary
+
+Auditing:
+  - audit_files(file_paths: list, description: str = "", focus_areas: list = None) -> dict: Request an auditor to review specific files
+    * file_paths: List of relative paths to files that need review
+    * description: What to audit and why (e.g., "Check for security issues", "Verify implementation")
+    * focus_areas: Optional list of areas to focus on (e.g., ["error_handling", "performance", "security"])
+    * Use this directly rather than waiting for manager to assign audit tasks
+
 Supported Languages:
   - "python" (uses PyPI and pip)
   - "javascript" or "node" (uses npm registry)
@@ -1047,18 +1249,24 @@ Security:
 - Only alphanumeric, hyphens, underscores, and dots allowed in package names
 
 Exception types: PathError (invalid path), FileSizeError (>10MB), PackageError (package operations failed), ToolError (general failures).
-See agent_tools_guide.md for detailed examples and patterns.
+See docs/agents/AGENT_TOOLS_GUIDE.md for detailed examples and patterns.
 """.strip()
 
+    if allowed_tools is not None:
+        allowed_line = "Allowed tools for your role: " + ", ".join(allowed_tools)
+        return f"{description}\n\n{allowed_line}".strip()
 
-def get_manager_tools_description() -> str:
+    return description
+
+
+def get_manager_tools_description(allowed_tools: Optional[List[str]] = None) -> str:
     """
     Get a formatted description of task assignment tools for the manager role.
     
     Returns:
         Multi-line string describing assignment tools and their usage
     """
-    return """
+    description = """
 Available task assignment tools:
 
 Task Assignment:
@@ -1092,3 +1300,9 @@ IMPORTANT:
 - The 'auditor' role should typically come AFTER developer tasks (higher sequence number)
 - Call assign_task/assign_tasks multiple times to build your task plan
 """.strip()
+
+    if allowed_tools is not None:
+        allowed_line = "Allowed tools for your role: " + ", ".join(allowed_tools)
+        return f"{description}\n\n{allowed_line}".strip()
+
+    return description

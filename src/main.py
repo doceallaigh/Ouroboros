@@ -20,7 +20,7 @@ from typing import Dict, List, Any, Optional
 
 from comms import ChannelFactory, CommunicationError, APIError, extract_content_from_response
 from filesystem import FileSystem, ReadOnlyFileSystem, FileSystemError
-from agent_tools import get_tools_description, AgentTools
+from agent_tools import get_tools_description, AgentTools, ToolError
 import re
 
 # Configure logging
@@ -77,15 +77,17 @@ class Agent:
         self.callback_handler = None  # Will be set by coordinator if callbacks are needed
         
         # Inject appropriate tools for each role
+        allowed_tools = self.config.get("allowed_tools")
+
         if self.role == "manager":
             from agent_tools import get_manager_tools_description
-            tools_desc = get_manager_tools_description()
+            tools_desc = get_manager_tools_description(allowed_tools)
             original_prompt = self.config.get("system_prompt", "")
             # Append tools description if not already present
             if "Available task assignment tools" not in original_prompt:
                 self.config["system_prompt"] = f"{original_prompt}\n\n{tools_desc}"
         elif self.role in ["developer", "auditor"]:
-            tools_desc = get_tools_description()
+            tools_desc = get_tools_description(allowed_tools)
             original_prompt = self.config.get("system_prompt", "")
             # Append tools description if not already present
             if "Available tools" not in original_prompt:
@@ -266,15 +268,21 @@ class Agent:
         
         Looks for Python code blocks containing tool calls and executes them.
         
+        For developer role:
+        - Tracks files produced (write_file, append_file, edit_file calls)
+        - Validates audit_files calls only reference produced files
+        - Prevents confirm_task_complete calls (developers cannot mark completion)
+        
         Args:
             response: Agent's text response potentially containing tool calls
             working_dir: Working directory for tool operations
             
         Returns:
-            Dict with execution results and summary
+            Dict with execution results, summary, and tracked metadata
         """
         # Initialize agent tools
-        tools = AgentTools(working_dir=working_dir)
+        allowed_tools = self.config.get("allowed_tools")
+        tools = AgentTools(working_dir=working_dir, allowed_tools=allowed_tools)
         
         # Extract Python code blocks from response
         code_blocks = re.findall(r'```python\n(.*?)\n```', response, re.DOTALL)
@@ -288,9 +296,25 @@ class Agent:
         
         results = []
         total_calls = 0
+        files_produced = set()  # Track files created/modified
+        audit_requests = []  # Track audit requests
         
+        def is_allowed(tool_name: str) -> bool:
+            return allowed_tools is None or tool_name in allowed_tools
+
         # Execute each code block
         for code_block in code_blocks:
+            # Check for disallowed tool calls in developer role
+            if self.role == "developer":
+                if 'confirm_task_complete(' in code_block:
+                    logger.error(f"Developer {self.name} attempted to use confirm_task_complete - not allowed")
+                    results.append({
+                        "success": False,
+                        "error": "Developers cannot use confirm_task_complete. Task completion must come from manager callback or audit feedback.",
+                        "code": code_block[:200]
+                    })
+                    continue
+            
             # Create a safe execution environment with tools available
             exec_globals = {
                 'read_file': tools.read_file,
@@ -302,19 +326,51 @@ class Agent:
                 'search_files': tools.search_files,
                 'get_file_info': tools.get_file_info,
                 'delete_file': tools.delete_file,
-                'raise_callback': self.raise_callback,  # Include callback method
                 'print': lambda *args, **kwargs: None,  # Suppress print statements
             }
+
+            if is_allowed("raise_callback"):
+                exec_globals['raise_callback'] = self.raise_callback
+            else:
+                def raise_callback_blocked(*_args, **_kwargs):
+                    raise ToolError("Tool not allowed for this role: raise_callback")
+                exec_globals['raise_callback'] = raise_callback_blocked
+            
+            # Add audit_files wrapper for developers to track audit requests and validate they only audit produced files
+            if self.role == "developer":
+                def audit_files_wrapper(file_paths, description="", focus_areas=None):
+                    # Pass currently produced files to validate the audit
+                    result = tools.audit_files(file_paths, description, focus_areas, produced_files=list(files_produced))
+                    audit_requests.append({
+                        "files": file_paths,
+                        "description": description,
+                        "focus_areas": focus_areas or []
+                    })
+                    return result
+                exec_globals['audit_files'] = audit_files_wrapper
+            else:
+                exec_globals['audit_files'] = tools.audit_files
+            
+            # Add confirm_task_complete for non-developer roles
+            if self.role != "developer":
+                exec_globals['confirm_task_complete'] = tools.confirm_task_complete
+            
             exec_locals = {}
             
             try:
                 # Execute the code
                 exec(code_block, exec_globals, exec_locals)
                 
+                # Track file operations for developer role
+                if self.role == "developer":
+                    for tool_name in ['write_file', 'append_file', 'edit_file']:
+                        calls = re.findall(rf'{tool_name}\(["\']([^"\']+)["\']', code_block)
+                        files_produced.update(calls)
+                
                 # Count tool calls (rough estimate based on function calls in code)
                 for tool_name in ['read_file', 'write_file', 'append_file', 'edit_file', 
                                  'list_directory', 'list_all_files', 'search_files', 
-                                 'get_file_info', 'delete_file', 'raise_callback']:
+                                 'get_file_info', 'delete_file', 'raise_callback', 'audit_files', 'confirm_task_complete']:
                     total_calls += code_block.count(f'{tool_name}(')
                 
                 results.append({
@@ -331,13 +387,22 @@ class Agent:
                     "code": code_block[:200]  # Include snippet for debugging
                 })
         
-        return {
+        result_dict = {
             "tools_executed": True,
             "code_blocks_found": len(code_blocks),
             "code_blocks_executed": len([r for r in results if r.get("success")]),
             "estimated_tool_calls": total_calls,
             "results": results
         }
+        
+        # Add tracking info for developer role
+        if self.role == "developer":
+            result_dict["files_produced"] = list(files_produced)
+            result_dict["audit_requests"] = audit_requests
+            if audit_requests and not files_produced:
+                logger.warning(f"Developer {self.name} requested audits but produced no files")
+        
+        return result_dict
     
     def raise_callback(self, message: str, callback_type: str = "query") -> Optional[str]:
         """

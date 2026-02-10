@@ -124,10 +124,6 @@ def extract_content_from_response(response: HTTPXResponse) -> str:
         except Exception:
             result = response.content.decode(errors="replace")
     
-    # Remove thinking tags if present (e.g., from reasoning models)
-    if "</think>" in result:
-        result = result.split("</think>")[-1].strip()
-    
     return sanitize_output(result)
 
 

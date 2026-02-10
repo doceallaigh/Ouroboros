@@ -35,13 +35,34 @@ result = append_file("log.txt", "New log entry\n")
 # Returns: {"path": "log.txt", "size": 15, "lines_added": 1}
 ```
 
-#### `edit_file(path: str, old_text: str, new_text: str) -> dict`
-Replace all occurrences of old_text with new_text in a file.
+#### `edit_file(path: str, diff: str) -> dict`
+Apply a unified diff to a file.
 
 **Example:**
 ```python
-result = edit_file("config.py", "DEBUG = False", "DEBUG = True")
-# Returns: {"path": "config.py", "replacements": 1, "success": True}
+diff = """--- a/config.py
++++ b/config.py
+@@ -1,2 +1,2 @@
+-DEBUG = False
++DEBUG = True
+"""
+result = edit_file("config.py", diff)
+# Returns: {"path": "config.py", "hunks": 1, "added": 1, "removed": 1, "success": True}
+```
+
+**Generating diffs with Python:**
+```python
+import difflib
+
+before = "DEBUG = False\n"
+after = "DEBUG = True\n"
+
+diff = "".join(difflib.unified_diff(
+    before.splitlines(keepends=True),
+    after.splitlines(keepends=True),
+    fromfile="config.py",
+    tofile="config.py",
+))
 ```
 
 ### Directory Operations
@@ -215,5 +236,5 @@ write_file("config.json", json.dumps(config, indent=2))
 # Find deprecated function calls
 matches = search_files("**/*.py")
 for file_path in matches["matches"]:
-    edit_file(file_path, "deprecated_func()", "new_func()")
+    edit_file(file_path, diff)
 ```

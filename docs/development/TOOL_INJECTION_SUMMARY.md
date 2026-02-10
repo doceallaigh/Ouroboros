@@ -44,7 +44,7 @@ File Reading:
 File Writing:
   - write_file(path: str, content: str) -> dict: Create or overwrite file (auto-creates directories)
   - append_file(path: str, content: str) -> dict: Append to file or create if missing
-  - edit_file(path: str, old_text: str, new_text: str) -> dict: Replace text in file
+  - edit_file(path: str, diff: str) -> dict: Apply unified diff to file
 
 Directory Operations:
   - list_directory(path: str) -> dict: List immediate contents (non-recursive)
