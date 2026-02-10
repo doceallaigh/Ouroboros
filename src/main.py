@@ -400,6 +400,9 @@ class CentralCoordinator:
             # Track instance counts for each role to generate unique names
             self.role_instance_counts: Dict[str, int] = {}
             
+            # Track callbacks from agents for handling blockers
+            self.callbacks: List[Dict[str, Any]] = []
+            
             # Create channel factory with replay data loader
             self.channel_factory = ChannelFactory(
                 replay_mode=replay_mode,
@@ -673,12 +676,86 @@ class CentralCoordinator:
         
         return invalid_roles
     
+    def _get_blocker_callbacks(self) -> List[Dict[str, Any]]:
+        """
+        Get all blocker callbacks from the callback list.
+        
+        Returns:
+            List of blocker callbacks
+        """
+        return [cb for cb in self.callbacks if cb.get("type") == "blocker"]
+    
+    def _create_final_verification_task(self, user_request: str, all_results: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Create a final verification task for the auditor.
+        
+        This task comprehensively verifies that all deliverables have been created
+        and that the solution works end-to-end.
+        
+        Args:
+            user_request: The original user request
+            all_results: All previous task results
+            
+        Returns:
+            Task assignment dict for final verification
+        """
+        blockers = self._get_blocker_callbacks()
+        blocker_summary = ""
+        if blockers:
+            blocker_summary = f"\n\nPrevious blockers found during development that should be resolved:\n"
+            for blocker in blockers:
+                blocker_summary += f"- {blocker['message'][:150]}\n"
+        
+        final_verification_task = {
+            "role": "auditor",
+            "task": f"""Perform a COMPREHENSIVE FINAL VERIFICATION of the entire solution.
+
+ORIGINAL REQUEST:
+{user_request[:1000]}
+
+VERIFICATION CHECKLIST:
+1. List all deliverables mentioned in the requirements
+2. Check if each deliverable file exists in the workspace
+3. Verify the quality and completeness of each deliverable
+4. Check for integration issues between components
+5. Validate that the solution meets ALL original requirements
+6. Report on overall solution readiness (PASS/FAIL with justification)
+
+CRITICAL: You MUST use the provided tools to:
+- List all files in the current directory and subdirectories
+- Read key files to verify their implementation
+- Check for any missing or incomplete components
+
+EXPECTED DELIVERABLES:
+Look for files matching these patterns and verify their presence and quality:
+- requirements.txt (or similar dependency file)
+- Python modules/scripts (.py files)
+- Documentation (README.md or similar)
+- Test files
+- Any model files or data artifacts mentioned
+{blocker_summary}
+
+REPORT FORMAT:
+Provide a clear, structured report with:
+1. Deliverables Status (list each with PRESENT/MISSING or COMPLETE/INCOMPLETE)
+2. Quality Assessment (code quality, documentation, error handling)
+3. Integration Status (all components work together)
+4. Overall Result: PASS (solution ready) or FAIL (issues remain)
+5. Recommendations (what needs to be fixed if FAIL)
+
+If any critical deliverables are missing or incomplete, report this as a BLOCKER callback.""",
+            "sequence": 99,  # Very high sequence to run after everything else
+        }
+        
+        return final_verification_task
+    
     def assign_and_execute(self, user_request: str) -> List[Dict[str, Any]]:
         """
         Main coordination method: decompose request and execute via agents.
         
         This is the primary entry point for processing user requests through
-        the agent harness.
+        the agent harness. It now includes a final verification auditor pass
+        to ensure all deliverables are complete.
         
         Args:
             user_request: User's request to process
@@ -709,10 +786,37 @@ class CentralCoordinator:
                 logger.error(f"Unexpected JSON error in assign_and_execute: {str(e)}")
                 raise OrganizationError(f"Failed to parse manager response: {str(e)}")
             
-            # Step 3: Execute tasks in parallel
+            # Step 3: Execute tasks in parallel (including developer, auditor, etc.)
             results = self._execute_assignments(assignments, user_request)
             
+            # Step 4: Execute final verification auditor pass
+            logger.info("=" * 80)
+            logger.info("FINAL VERIFICATION PHASE")
+            logger.info("=" * 80)
+            
+            final_verification_task = self._create_final_verification_task(user_request, results)
+            final_verification_result = self._execute_single_assignment(
+                role=final_verification_task["role"],
+                task={
+                    "description": final_verification_task["task"],
+                    "caller": "manager",
+                },
+                original_request=user_request,
+            )
+            results.append(final_verification_result)
+            
+            # Step 5: Check for critical blockers from final verification
+            blocker_callbacks = self._get_blocker_callbacks()
+            if blocker_callbacks:
+                logger.warning(f"\n{'=' * 80}")
+                logger.warning(f"CRITICAL ISSUES IDENTIFIED ({len(blocker_callbacks)} blockers):")
+                for blocker in blocker_callbacks:
+                    logger.warning(f"  - {blocker['message'][:150]}")
+                logger.warning(f"{'=' * 80}\n")
+            
             logger.info(f"Request processing complete with {len(results)} results")
+            logger.info(f"Callbacks recorded: {len(self.callbacks)} total")
+            
             return results
             
         except Exception as e:
@@ -849,8 +953,19 @@ class CentralCoordinator:
                         }
                     )
                     
-                    # For now, return None - future enhancement could route to actual caller agent
-                    # TODO: Implement actual routing to caller agent for response
+                    # Store callback for handling (e.g., creating remediation tasks for blockers)
+                    self.callbacks.append({
+                        "from": agent_name,
+                        "to": caller,
+                        "type": callback_type,
+                        "message": message,
+                        "timestamp": time.time(),
+                    })
+                    
+                    # For blockers, log as warning so they're visible
+                    if callback_type == "blocker":
+                        logger.warning(f"BLOCKER reported: {message[:200]}")
+                    
                     return None
                 
                 agent.callback_handler = callback_handler
