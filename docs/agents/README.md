@@ -48,7 +48,7 @@ Your available methods are organized in these categories:
 - `read_file(path)` - Read and return file contents
 - `write_file(path, content)` - Create or overwrite a file
 - `append_file(path, content)` - Add to end of file
-- `edit_file(path, old_text, new_text)` - Replace text within file
+- `edit_file(path, diff)` - Apply a unified diff to a file
 
 ### File Information
 - `get_file_info(path)` - Get file metadata (size, type, modified time, line count)
