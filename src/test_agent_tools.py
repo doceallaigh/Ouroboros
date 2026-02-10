@@ -209,11 +209,23 @@ class TestFileEditing(unittest.TestCase):
             tofile="test.txt",
         ))
         result = self.tools.edit_file("test.txt", diff)
+        self.tools.write_file("test.txt", "Hello world\n")
+        before = "Hello world\n"
+        after = "Hello Python\n"
+        diff = "".join(difflib.unified_diff(
+            before.splitlines(keepends=True),
+            after.splitlines(keepends=True),
+            fromfile="test.txt",
+            tofile="test.txt",
+        ))
+        result = self.tools.edit_file("test.txt", diff)
         
         self.assertTrue(result["success"])
         self.assertEqual(result["hunks"], 1)
+        self.assertEqual(result["hunks"], 1)
         
         content = self.tools.read_file("test.txt")
+        self.assertEqual(content, "Hello Python\n")
         self.assertEqual(content, "Hello Python\n")
 
     def test_edit_file_multiple_replacements(self):
@@ -228,10 +240,22 @@ class TestFileEditing(unittest.TestCase):
             tofile="test.txt",
         ))
         result = self.tools.edit_file("test.txt", diff)
+        self.tools.write_file("test.txt", "foo bar foo baz foo\n")
+        before = "foo bar foo baz foo\n"
+        after = "qux bar qux baz qux\n"
+        diff = "".join(difflib.unified_diff(
+            before.splitlines(keepends=True),
+            after.splitlines(keepends=True),
+            fromfile="test.txt",
+            tofile="test.txt",
+        ))
+        result = self.tools.edit_file("test.txt", diff)
         
+        self.assertEqual(result["hunks"], 1)
         self.assertEqual(result["hunks"], 1)
         
         content = self.tools.read_file("test.txt")
+        self.assertEqual(content, "qux bar qux baz qux\n")
         self.assertEqual(content, "qux bar qux baz qux\n")
 
     def test_edit_file_no_matches(self):

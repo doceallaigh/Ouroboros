@@ -22,6 +22,7 @@ import subprocess
 import json
 import sys
 import re
+import re
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 from code_runner import CodeRunner, CodeRunError
@@ -99,6 +100,7 @@ class AgentTools:
             working_dir: Root directory for all operations (default: current directory)
             max_file_size: Maximum file size in bytes for read operations
             allowed_tools: Optional list of tool names allowed for the role
+            allowed_tools: Optional list of tool names allowed for the role
             
         Raises:
             ToolError: If working directory doesn't exist
@@ -111,6 +113,16 @@ class AgentTools:
         self.allowed_tools = set(allowed_tools) if allowed_tools is not None else None
         self.code_runner = CodeRunner()
         logger.info(f"Initialized AgentTools with working_dir: {self.working_dir}")
+
+    def __getattribute__(self, name: str):
+        tool_methods = object.__getattribute__(self, "TOOL_METHODS")
+        if name in tool_methods:
+            allowed_tools = object.__getattribute__(self, "allowed_tools")
+            if allowed_tools is not None and name not in allowed_tools:
+                def _blocked(*_args, **_kwargs):
+                    raise ToolError(f"Tool not allowed for this role: {name}")
+                return _blocked
+        return object.__getattribute__(self, name)
 
     def __getattribute__(self, name: str):
         tool_methods = object.__getattribute__(self, "TOOL_METHODS")
@@ -338,19 +350,24 @@ class AgentTools:
             raise ToolError(f"Failed to append to file {path}: {e}")
     
     def edit_file(self, path: str, diff: str, encoding: str = "utf-8") -> Dict[str, Any]:
+    def edit_file(self, path: str, diff: str, encoding: str = "utf-8") -> Dict[str, Any]:
         """
+        Edit file by applying a unified diff.
         Edit file by applying a unified diff.
         
         Args:
             path: File path (relative to working_dir)
             diff: Unified diff string (single-file) to apply
+            diff: Unified diff string (single-file) to apply
             encoding: Text encoding (default: utf-8)
             
         Returns:
             Dictionary with path, hunks applied, and result
+            Dictionary with path, hunks applied, and result
             
         Raises:
             PathError: If path is invalid
+            ToolError: If patch fails or does not match file contents
             ToolError: If patch fails or does not match file contents
         """
         try:
@@ -362,23 +379,34 @@ class AgentTools:
             # Read file
             with open(file_path, 'r', encoding=encoding) as f:
                 original_lines = f.read().splitlines(keepends=True)
+                original_lines = f.read().splitlines(keepends=True)
             
             new_lines, stats = self._apply_unified_diff(original_lines, diff)
+            new_lines, stats = self._apply_unified_diff(original_lines, diff)
             
+            if not stats["hunks"]:
             if not stats["hunks"]:
                 return {
                     "path": path,
                     "hunks": 0,
                     "added": 0,
                     "removed": 0,
+                    "hunks": 0,
+                    "added": 0,
+                    "removed": 0,
                     "success": False,
+                    "message": "No hunks applied",
                     "message": "No hunks applied",
                 }
             
             # Write back
             with open(file_path, 'w', encoding=encoding) as f:
                 f.write("".join(new_lines))
+                f.write("".join(new_lines))
             
+            logger.info(
+                f"Edited file: {path} (hunks={stats['hunks']}, added={stats['added']}, removed={stats['removed']})"
+            )
             logger.info(
                 f"Edited file: {path} (hunks={stats['hunks']}, added={stats['added']}, removed={stats['removed']})"
             )
@@ -388,10 +416,15 @@ class AgentTools:
                 "hunks": stats["hunks"],
                 "added": stats["added"],
                 "removed": stats["removed"],
+                "hunks": stats["hunks"],
+                "added": stats["added"],
+                "removed": stats["removed"],
                 "success": True,
             }
         
         except PathError:
+            raise
+        except ToolError:
             raise
         except ToolError:
             raise
@@ -1668,6 +1701,7 @@ class AgentTools:
 
 # Helper functions for direct use
 def get_tools(working_dir: str = DEFAULT_WORKING_DIR, allowed_tools: Optional[List[str]] = None) -> AgentTools:
+def get_tools(working_dir: str = DEFAULT_WORKING_DIR, allowed_tools: Optional[List[str]] = None) -> AgentTools:
     """
     Factory function to create an AgentTools instance.
 
@@ -1675,13 +1709,16 @@ def get_tools(working_dir: str = DEFAULT_WORKING_DIR, allowed_tools: Optional[Li
     Args:
         working_dir: Root directory for operations
         allowed_tools: Optional list of tool names allowed for the role
+        allowed_tools: Optional list of tool names allowed for the role
         
     Returns:
         AgentTools instance
     """
     return AgentTools(working_dir, allowed_tools=allowed_tools)
+    return AgentTools(working_dir, allowed_tools=allowed_tools)
 
 
+def get_tools_description(allowed_tools: Optional[List[str]] = None) -> str:
 def get_tools_description(allowed_tools: Optional[List[str]] = None) -> str:
     """
     Get a formatted description of all available tools for injection into agent prompts.
@@ -1689,6 +1726,7 @@ def get_tools_description(allowed_tools: Optional[List[str]] = None) -> str:
     Returns:
         Multi-line string describing all tools and their signatures
     """
+    description = """
     description = """
 Available tools (call these methods in your implementation):
 
@@ -1699,6 +1737,7 @@ File Reading:
 File Writing:
   - write_file(path: str, content: str) -> dict: Create or overwrite file (auto-creates directories)
   - append_file(path: str, content: str) -> dict: Append to file or create if missing
+    - edit_file(path: str, diff: str) -> dict: Apply unified diff to file
     - edit_file(path: str, diff: str) -> dict: Apply unified diff to file
 
 Directory Operations:
@@ -1752,7 +1791,14 @@ See docs/agents/AGENT_TOOLS_GUIDE.md for detailed examples and patterns.
     if allowed_tools is not None:
         allowed_line = "Allowed tools for your role: " + ", ".join(allowed_tools)
         return f"{description}\n\n{allowed_line}".strip()
+    if allowed_tools is not None:
+        allowed_line = "Allowed tools for your role: " + ", ".join(allowed_tools)
+        return f"{description}\n\n{allowed_line}".strip()
 
+    return description
+
+
+def get_manager_tools_description(allowed_tools: Optional[List[str]] = None) -> str:
     return description
 
 
@@ -1763,6 +1809,7 @@ def get_manager_tools_description(allowed_tools: Optional[List[str]] = None) -> 
     Returns:
         Multi-line string describing assignment tools and their usage
     """
+    description = """
     description = """
 Available task assignment tools:
 
@@ -1797,6 +1844,12 @@ IMPORTANT:
 - The 'auditor' role should typically come AFTER developer tasks (higher sequence number)
 - Call assign_task/assign_tasks multiple times to build your task plan
 """.strip()
+
+    if allowed_tools is not None:
+        allowed_line = "Allowed tools for your role: " + ", ".join(allowed_tools)
+        return f"{description}\n\n{allowed_line}".strip()
+
+    return description
 
     if allowed_tools is not None:
         allowed_line = "Allowed tools for your role: " + ", ".join(allowed_tools)

@@ -22,6 +22,7 @@ from typing import Dict, List, Any, Optional
 from comms import ChannelFactory, CommunicationError, APIError, extract_content_from_response
 from filesystem import FileSystem, ReadOnlyFileSystem, FileSystemError
 from agent_tools import get_tools_description, AgentTools, ToolError
+from agent_tools import get_tools_description, AgentTools, ToolError
 import re
 
 # Configure logging
@@ -80,14 +81,18 @@ class Agent:
         # Inject appropriate tools for each role
         allowed_tools = self.config.get("allowed_tools")
 
+        allowed_tools = self.config.get("allowed_tools")
+
         if self.role == "manager":
             from agent_tools import get_manager_tools_description
+            tools_desc = get_manager_tools_description(allowed_tools)
             tools_desc = get_manager_tools_description(allowed_tools)
             original_prompt = self.config.get("system_prompt", "")
             # Append tools description if not already present
             if "Available task assignment tools" not in original_prompt:
                 self.config["system_prompt"] = f"{original_prompt}\n\n{tools_desc}"
         elif self.role in ["developer", "auditor"]:
+            tools_desc = get_tools_description(allowed_tools)
             tools_desc = get_tools_description(allowed_tools)
             original_prompt = self.config.get("system_prompt", "")
             # Append tools description if not already present
@@ -467,11 +472,17 @@ class Agent:
         - Validates audit_files calls only reference produced files
         - Prevents confirm_task_complete calls (developers cannot mark completion)
         
+        For developer role:
+        - Tracks files produced (write_file, append_file, edit_file calls)
+        - Validates audit_files calls only reference produced files
+        - Prevents confirm_task_complete calls (developers cannot mark completion)
+        
         Args:
             response: Agent's text response potentially containing tool calls
             working_dir: Working directory for tool operations
             
         Returns:
+            Dict with execution results, summary, and tracked metadata
             Dict with execution results, summary, and tracked metadata
         """
         # Initialize agent tools
@@ -497,8 +508,25 @@ class Agent:
         def is_allowed(tool_name: str) -> bool:
             return allowed_tools is None or tool_name in allowed_tools
 
+        files_produced = set()  # Track files created/modified
+        audit_requests = []  # Track audit requests
+        
+        def is_allowed(tool_name: str) -> bool:
+            return allowed_tools is None or tool_name in allowed_tools
+
         # Execute each code block
         for code_block in code_blocks:
+            # Check for disallowed tool calls in developer role
+            if self.role == "developer":
+                if 'confirm_task_complete(' in code_block:
+                    logger.error(f"Developer {self.name} attempted to use confirm_task_complete - not allowed")
+                    results.append({
+                        "success": False,
+                        "error": "Developers cannot use confirm_task_complete. Task completion must come from manager callback or audit feedback.",
+                        "code": code_block[:200]
+                    })
+                    continue
+            
             # Check for disallowed tool calls in developer role
             if self.role == "developer":
                 if 'confirm_task_complete(' in code_block:
@@ -579,6 +607,12 @@ class Agent:
             try:
                 # Execute the code
                 exec(code_block, exec_globals, exec_locals)
+                
+                # Track file operations for developer role
+                if self.role == "developer":
+                    for tool_name in ['write_file', 'append_file', 'edit_file']:
+                        calls = re.findall(rf'{tool_name}\(["\']([^"\']+)["\']', code_block)
+                        files_produced.update(calls)
                 
                 # Track file operations for developer role
                 if self.role == "developer":
