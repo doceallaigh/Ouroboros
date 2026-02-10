@@ -60,7 +60,7 @@ class TestFileSystem(unittest.TestCase):
         fs = FileSystem(shared_dir=self.shared_dir, replay_mode=False)
         fs.write_data("test_agent", "Test output data")
         
-        file_path = os.path.join(fs.working_dir, "test_agent.txt")
+        file_path = os.path.join(fs.logs_dir, "test_agent.txt")
         self.assertTrue(os.path.exists(file_path))
         
         with open(file_path, 'r', encoding='utf-8') as f:
@@ -73,7 +73,7 @@ class TestFileSystem(unittest.TestCase):
         fs.write_data("test_agent", "First data")
         fs.write_data("test_agent", "Second data")
         
-        file_path = os.path.join(fs.working_dir, "test_agent.txt")
+        file_path = os.path.join(fs.logs_dir, "test_agent.txt")
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
         self.assertEqual(content, "Second data")
@@ -84,7 +84,7 @@ class TestFileSystem(unittest.TestCase):
         data = {"key": "value", "number": 42}
         fs.write_structured_data("test_agent", data)
         
-        file_path = os.path.join(fs.working_dir, "test_agent_structured.json")
+        file_path = os.path.join(fs.logs_dir, "test_agent_structured.json")
         self.assertTrue(os.path.exists(file_path))
         
         with open(file_path, 'r', encoding='utf-8') as f:
@@ -100,7 +100,7 @@ class TestFileSystem(unittest.TestCase):
         ]
         fs.save_conversation_history("test_agent", history)
         
-        file_path = os.path.join(fs.working_dir, "test_agent_history.json")
+        file_path = os.path.join(fs.logs_dir, "test_agent_history.json")
         self.assertTrue(os.path.exists(file_path))
         
         with open(file_path, 'r', encoding='utf-8') as f:
@@ -213,13 +213,14 @@ class TestReadOnlyFileSystem(unittest.TestCase):
 
     def test_get_recorded_output_read_only_mode(self):
         """Should still be able to read recorded output in read-only mode."""
-        # Create session directory and write initial data
+        # Create session directory with logs subdirectory
         session_id = "20260207_000000000"
         session_dir = os.path.join(self.shared_dir, session_id)
-        os.makedirs(session_dir, exist_ok=True)
+        logs_dir = os.path.join(session_dir, "logs")
+        os.makedirs(logs_dir, exist_ok=True)
         
-        # Write agent data in .txt format (what write_data creates)
-        agent_file = os.path.join(session_dir, "test_agent.txt")
+        # Write agent data in .txt format to logs directory (what write_data creates)
+        agent_file = os.path.join(logs_dir, "test_agent.txt")
         with open(agent_file, 'w', encoding='utf-8') as f:
             f.write("Recorded output data")
         
@@ -228,6 +229,7 @@ class TestReadOnlyFileSystem(unittest.TestCase):
         
         # Manually set working_dir to use our session
         fs.working_dir = session_dir
+        fs.logs_dir = logs_dir
         
         # Should still be able to read
         output = fs.get_recorded_output("test_agent")

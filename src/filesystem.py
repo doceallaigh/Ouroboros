@@ -25,7 +25,7 @@ class FileSystemError(Exception):
 class FileSystem:
     def get_recorded_outputs_in_order(self, agent_name: str) -> list:
         """
-        Retrieve all recorded outputs for an agent, sorted by query timestamp.
+        Retrieve all recorded outputs for an agent from logs directory, sorted by query timestamp.
 
         Returns:
             List of (query_timestamp, content) tuples, sorted by timestamp.
@@ -33,11 +33,11 @@ class FileSystem:
         outputs = []
         try:
             file_paths = sorted(
-                f for f in os.listdir(self.working_dir)
+                f for f in os.listdir(self.logs_dir)
                 if f.startswith(agent_name) and f.endswith(".txt")
             )
             for file_path in file_paths:
-                full_path = os.path.join(self.working_dir, file_path)
+                full_path = os.path.join(self.logs_dir, file_path)
                 with open(full_path, 'r', encoding='utf-8') as f:
                     content = f.read()
                 # Extract QUERY_TIMESTAMP from the file
@@ -105,10 +105,18 @@ class FileSystem:
             self.working_dir = os.path.join(self.shared_dir, self.session_id)
             os.makedirs(self.working_dir, exist_ok=True)
             
+            # Create logs and src subdirectories for organized task output
+            self.logs_dir = os.path.join(self.working_dir, "logs")
+            self.src_dir = os.path.join(self.working_dir, "src")
+            os.makedirs(self.logs_dir, exist_ok=True)
+            os.makedirs(self.src_dir, exist_ok=True)
+            
             self.events_file = os.path.join(self.working_dir, "_events.jsonl")
             
             logger.info(f"Initialized FileSystem with session {self.session_id}")
             logger.debug(f"Working directory: {self.working_dir}")
+            logger.debug(f"Logs directory: {self.logs_dir}")
+            logger.debug(f"Source directory: {self.src_dir}")
             logger.debug(f"Events file: {self.events_file}")
             
         except Exception as e:
@@ -140,7 +148,7 @@ class FileSystem:
     
     def write_data(self, agent_name: str, data: str) -> None:
         """
-        Store agent output data to file.
+        Store agent output data to file in logs directory.
         
         Args:
             agent_name: Name of agent
@@ -150,7 +158,7 @@ class FileSystem:
             FileSystemError: If write fails
         """
         try:
-            file_path = os.path.join(self.working_dir, f"{agent_name}.txt")
+            file_path = os.path.join(self.logs_dir, f"{agent_name}.txt")
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(data)
             logger.debug(f"Wrote data for agent {agent_name} to {file_path}")
@@ -159,12 +167,12 @@ class FileSystem:
 
     def create_query_file(self, agent_name: str, ticks: int, query_timestamp: str, payload: Dict[str, Any]) -> str:
         """
-        Create a per-query file named {agent_name}_{ticks}.txt and write the query timestamp and payload.
+        Create a per-query file in logs directory named {agent_name}_{ticks}.txt and write the query timestamp and payload.
 
         Returns the full path to the created file.
         """
         try:
-            file_path = os.path.join(self.working_dir, f"{agent_name}_{ticks}.txt")
+            file_path = os.path.join(self.logs_dir, f"{agent_name}_{ticks}.txt")
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(f"QUERY_TIMESTAMP: {query_timestamp}\n")
                 f.write("PAYLOAD:\n")
@@ -177,10 +185,10 @@ class FileSystem:
 
     def append_response_file(self, agent_name: str, ticks: int, response_timestamp: str, response: str) -> None:
         """
-        Append response timestamp and response content to the per-query file {agent_name}_{ticks}.txt.
+        Append response timestamp and response content to the per-query file in logs directory {agent_name}_{ticks}.txt.
         """
         try:
-            file_path = os.path.join(self.working_dir, f"{agent_name}_{ticks}.txt")
+            file_path = os.path.join(self.logs_dir, f"{agent_name}_{ticks}.txt")
             with open(file_path, 'a', encoding='utf-8') as f:
                 f.write(f"RESPONSE_TIMESTAMP: {response_timestamp}\n")
                 f.write("RESPONSE:\n")
@@ -192,7 +200,7 @@ class FileSystem:
     
     def write_structured_data(self, agent_name: str, data: Dict[str, Any]) -> None:
         """
-        Store structured (JSON) data for an agent.
+        Store structured (JSON) data for an agent in logs directory.
         
         Args:
             agent_name: Name of agent
@@ -202,7 +210,7 @@ class FileSystem:
             FileSystemError: If write fails
         """
         try:
-            file_path = os.path.join(self.working_dir, f"{agent_name}_structured.json")
+            file_path = os.path.join(self.logs_dir, f"{agent_name}_structured.json")
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
             logger.debug(f"Wrote structured data for agent {agent_name}")
@@ -211,7 +219,7 @@ class FileSystem:
     
     def get_recorded_output(self, agent_name: str) -> Optional[str]:
         """
-        Retrieve previously recorded output for an agent.
+        Retrieve previously recorded output for an agent from logs directory.
         
         Args:
             agent_name: Name of agent to retrieve data for
@@ -220,10 +228,10 @@ class FileSystem:
             Recorded output string, or None if not found
         """
         try:
-            file_paths = sorted(os.listdir(self.working_dir))
+            file_paths = sorted(os.listdir(self.logs_dir))
             for file_path in file_paths:
                 if file_path.startswith(agent_name) and file_path.endswith(".txt"):
-                    full_path = os.path.join(self.working_dir, file_path)
+                    full_path = os.path.join(self.logs_dir, file_path)
                     with open(full_path, 'r', encoding='utf-8') as f:
                         content = f.read()
                     logger.debug(f"Retrieved recorded output for {agent_name}")
@@ -237,14 +245,14 @@ class FileSystem:
     
     def save_conversation_history(self, agent_name: str, history: List[Dict[str, str]]) -> None:
         """
-        Save full conversation history for an agent.
+        Save full conversation history for an agent in logs directory.
         
         Args:
             agent_name: Name of agent
             history: List of conversation messages
         """
         try:
-            file_path = os.path.join(self.working_dir, f"{agent_name}_history.json")
+            file_path = os.path.join(self.logs_dir, f"{agent_name}_history.json")
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(history, f, indent=2)
             logger.debug(f"Saved conversation history for {agent_name}")
@@ -252,10 +260,12 @@ class FileSystem:
             logger.error(f"Failed to save conversation history for {agent_name}: {e}")
     
     def get_session_metadata(self) -> Dict[str, Any]:
-        """Get metadata about current session."""
+        """Get metadata about current session, including logs and src directories."""
         return {
             "session_id": self.session_id,
             "working_dir": self.working_dir,
+            "logs_dir": self.logs_dir,
+            "src_dir": self.src_dir,
             "created_at": self.session_id,  # Session ID contains timestamp
         }
     
@@ -341,8 +351,8 @@ class ReadOnlyFileSystem(FileSystem):
         logger.debug(f"ReadOnlyFileSystem: Ignoring event record attempt for type {event_type}")
 
     def create_query_file(self, agent_name: str, ticks: int, query_timestamp: str, payload: Dict[str, Any]) -> str:
-        """No-op in replay mode; return expected file path."""
-        file_path = os.path.join(self.working_dir, f"{agent_name}_{ticks}.txt")
+        """No-op in replay mode; return expected file path from logs directory."""
+        file_path = os.path.join(self.logs_dir, f"{agent_name}_{ticks}.txt")
         logger.debug(f"ReadOnlyFileSystem: Ignoring create_query_file for {file_path}")
         return file_path
 

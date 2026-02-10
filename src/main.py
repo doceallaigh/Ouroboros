@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import os
+import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -262,6 +263,199 @@ class Agent:
         logger.error(error_msg)
         raise OrganizationError(error_msg)
     
+    def execute_with_agentic_loop(self, task: Dict[str, Any], working_dir: str = ".", max_iterations: int = 15) -> Dict[str, Any]:
+        """
+        Execute a task with an agentic loop: agent can make tool calls, see results, and iterate.
+        
+        The loop continues until:
+        - Agent calls confirm_task_complete()
+        - Agent stops making tool calls
+        - Max iterations reached
+        
+        Args:
+            task: Task dict with 'user_prompt'
+            working_dir: Working directory for tool operations
+            max_iterations: Maximum number of agent-tool iterations (default: 15)
+            
+        Returns:
+            Dict with final response, tool results, and iteration count
+        """
+        logger.info(f"Agent {self.name} starting agentic loop (max_iterations={max_iterations})")
+        
+        # Initialize conversation history
+        conversation_history = [
+            {
+                "role": "system",
+                "content": self.config.get("system_prompt", "")
+            },
+            {
+                "role": "user",
+                "content": task.get("user_prompt", "")
+            }
+        ]
+        
+        all_tool_results = []
+        iteration_count = 0
+        task_complete = False
+        
+        for iteration in range(max_iterations):
+            iteration_count = iteration + 1
+            logger.debug(f"Agent {self.name} iteration {iteration_count}/{max_iterations}")
+            
+            # Execute task with current conversation history
+            response = self._execute_with_conversation_history(conversation_history)
+            
+            # Add assistant response to history
+            conversation_history.append({
+                "role": "assistant",
+                "content": response
+            })
+            
+            # Execute tools from response
+            tool_results = self.execute_tools_from_response(response, working_dir=working_dir)
+            all_tool_results.append(tool_results)
+            
+            # Check if tools were executed
+            if not tool_results.get("tools_executed"):
+                logger.info(f"Agent {self.name} made no tool calls, ending loop")
+                break
+            
+            # Check for task completion signal
+            if self._check_task_completion(tool_results):
+                logger.info(f"Agent {self.name} signaled task completion")
+                task_complete = True
+                break
+            
+            # Format tool results and add to conversation as user message
+            tool_summary = self._format_tool_results(tool_results)
+            conversation_history.append({
+                "role": "user",
+                "content": f"Tool execution results:\n\n{tool_summary}\n\nContinue working or call confirm_task_complete() when done."
+            })
+        
+        # Check if we hit max iterations
+        if iteration_count >= max_iterations and not task_complete:
+            logger.warning(f"Agent {self.name} reached max iterations ({max_iterations}) without completing")
+        
+        logger.info(f"Agent {self.name} agentic loop complete: {iteration_count} iterations")
+        
+        return {
+            "final_response": response,
+            "conversation_history": conversation_history,
+            "tool_results": all_tool_results,
+            "iteration_count": iteration_count,
+            "task_complete": task_complete,
+        }
+    
+    def _execute_with_conversation_history(self, conversation_history: List[Dict[str, str]]) -> str:
+        """
+        Execute agent with full conversation history (maintains context across iterations).
+        
+        Args:
+            conversation_history: List of message dicts with 'role' and 'content'
+            
+        Returns:
+            Agent's response as string
+        """
+        base_timeout = self.config.get("timeout", 120)
+        
+        # Parse model_endpoints configuration
+        model_endpoints = self.config.get("model_endpoints", [])
+        if not model_endpoints:
+            model_endpoints = [{"model": "qwen/qwen2-7b", "endpoint": "http://localhost:12345/v1/chat/completions"}]
+        
+        backoff_delay = 1.0
+        
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                current_timeout = base_timeout * (self.INITIAL_TIMEOUT_MULTIPLIER ** attempt)
+                
+                pair_index = min(attempt, len(model_endpoints) - 1)
+                selected_pair = model_endpoints[pair_index]
+                selected_model = selected_pair["model"]
+                selected_endpoint = selected_pair["endpoint"]
+                
+                # Build payload with full conversation history
+                payload = {
+                    "messages": conversation_history,
+                    "model": selected_model,
+                    "temperature": float(self.config.get("temperature", 0.7)),
+                    "max_tokens": int(self.config.get("max_tokens", -1)),
+                }
+                
+                self.channel.config["endpoint"] = selected_endpoint
+                
+                ticks = self.channel.send_message(payload)
+                
+                resp_result = asyncio.run(self.channel.receive_message())
+                if isinstance(resp_result, tuple):
+                    response, _ = resp_result
+                else:
+                    response = resp_result
+                
+                result = extract_content_from_response(response)
+                return result
+                
+            except APIError as e:
+                if "timed out" in str(e).lower() and attempt < self.MAX_RETRIES - 1:
+                    logger.warning(f"Agent {self.name} timeout, retrying...")
+                    time.sleep(backoff_delay)
+                    backoff_delay *= self.BACKOFF_MULTIPLIER
+                    continue
+                else:
+                    raise OrganizationError(f"Agent {self.name} failed: {e}")
+            except Exception as e:
+                raise OrganizationError(f"Agent {self.name} failed: {e}")
+        
+        raise OrganizationError(f"Agent {self.name} failed after {self.MAX_RETRIES} retries")
+    
+    def _check_task_completion(self, tool_results: Dict[str, Any]) -> bool:
+        """
+        Check if agent has signaled task completion.
+        
+        Args:
+            tool_results: Tool execution results dict
+            
+        Returns:
+            True if task is complete, False otherwise
+        """
+        # Check for task_complete flag set by execute_tools_from_response
+        return tool_results.get("task_complete", False)
+    
+    def _format_tool_results(self, tool_results: Dict[str, Any]) -> str:
+        """
+        Format tool execution results into a readable summary for the agent.
+        
+        Args:
+            tool_results: Tool execution results dict
+            
+        Returns:
+            Formatted summary string
+        """
+        if not tool_results.get("tools_executed"):
+            return "No tools were executed."
+        
+        summary_parts = []
+        summary_parts.append(f"Executed {tool_results.get('code_blocks_executed', 0)} code blocks successfully.")
+        summary_parts.append(f"Estimated {tool_results.get('estimated_tool_calls', 0)} tool calls made.")
+        
+        # Add results details
+        results = tool_results.get("results", [])
+        if results:
+            for i, result in enumerate(results, 1):
+                if result.get("success"):
+                    summary_parts.append(f"✓ Code block {i}: Success")
+                else:
+                    error = result.get("error", "Unknown error")
+                    summary_parts.append(f"✗ Code block {i}: Failed - {error}")
+        
+        # Add file tracking for developer role
+        if tool_results.get("files_produced"):
+            files = tool_results["files_produced"]
+            summary_parts.append(f"\nFiles created/modified: {', '.join(files)}")
+        
+        return "\n".join(summary_parts)
+    
     def execute_tools_from_response(self, response: str, working_dir: str = ".") -> Dict[str, Any]:
         """
         Extract and execute tool calls from an agent's response.
@@ -283,6 +477,7 @@ class Agent:
         # Initialize agent tools
         allowed_tools = self.config.get("allowed_tools")
         tools = AgentTools(working_dir=working_dir, allowed_tools=allowed_tools)
+        default_git_branch = self.config.get("default_git_branch")
         
         # Extract Python code blocks from response
         code_blocks = re.findall(r'```python\n(.*?)\n```', response, re.DOTALL)
@@ -329,6 +524,30 @@ class Agent:
                 'print': lambda *args, **kwargs: None,  # Suppress print statements
             }
 
+            if is_allowed("clone_repo"):
+                def clone_repo_wrapper(repo_url, dest_dir=None, branch=None, depth=None):
+                    effective_branch = branch or default_git_branch
+                    return tools.clone_repo(repo_url, dest_dir=dest_dir, branch=effective_branch, depth=depth)
+                exec_globals['clone_repo'] = clone_repo_wrapper
+            else:
+                def clone_repo_blocked(*_args, **_kwargs):
+                    raise ToolError("Tool not allowed for this role: clone_repo")
+                exec_globals['clone_repo'] = clone_repo_blocked
+
+            if is_allowed("run_python"):
+                exec_globals['run_python'] = tools.run_python
+            else:
+                def run_python_blocked(*_args, **_kwargs):
+                    raise ToolError("Tool not allowed for this role: run_python")
+                exec_globals['run_python'] = run_python_blocked
+            
+            if is_allowed("checkout_branch"):
+                exec_globals['checkout_branch'] = tools.checkout_branch
+            else:
+                def checkout_branch_blocked(*_args, **_kwargs):
+                    raise ToolError("Tool not allowed for this role: checkout_branch")
+                exec_globals['checkout_branch'] = checkout_branch_blocked
+
             if is_allowed("raise_callback"):
                 exec_globals['raise_callback'] = self.raise_callback
             else:
@@ -370,8 +589,14 @@ class Agent:
                 # Count tool calls (rough estimate based on function calls in code)
                 for tool_name in ['read_file', 'write_file', 'append_file', 'edit_file', 
                                  'list_directory', 'list_all_files', 'search_files', 
-                                 'get_file_info', 'delete_file', 'raise_callback', 'audit_files', 'confirm_task_complete']:
-                    total_calls += code_block.count(f'{tool_name}(')
+                                 'get_file_info', 'delete_file', 'clone_repo', 'checkout_branch', 'run_python',
+                                 'raise_callback', 'audit_files', 'confirm_task_complete']:
+                    calls = code_block.count(f'{tool_name}(')
+                    total_calls += calls
+                    
+                    # Track task completion signal
+                    if tool_name == 'confirm_task_complete' and calls > 0:
+                        task_complete_detected = True
                 
                 results.append({
                     "success": True,
@@ -387,12 +612,20 @@ class Agent:
                     "code": code_block[:200]  # Include snippet for debugging
                 })
         
+        # Check if task completion was signaled
+        task_complete_detected = False
+        for code_block in code_blocks:
+            if 'confirm_task_complete(' in code_block:
+                task_complete_detected = True
+                break
+        
         result_dict = {
             "tools_executed": True,
             "code_blocks_found": len(code_blocks),
             "code_blocks_executed": len([r for r in results if r.get("success")]),
             "estimated_tool_calls": total_calls,
-            "results": results
+            "results": results,
+            "task_complete": task_complete_detected
         }
         
         # Add tracking info for developer role
@@ -443,6 +676,8 @@ class CentralCoordinator:
         config_path: str,
         filesystem: FileSystem,
         replay_mode: bool = False,
+        repo_working_dir: Optional[str] = None,
+        allow_git_tools: bool = True,
     ):
         """
         Initialize the coordinator.
@@ -451,6 +686,8 @@ class CentralCoordinator:
             config_path: Path to roles.json configuration file
             filesystem: Filesystem manager for data storage
             replay_mode: Whether to run in replay mode
+            repo_working_dir: Optional repository working directory for tool execution
+            allow_git_tools: Whether git tools are enabled for agents
             
         Raises:
             OrganizationError: If initialization fails
@@ -461,6 +698,8 @@ class CentralCoordinator:
             
             self.filesystem = filesystem
             self.replay_mode = replay_mode
+            self.repo_working_dir = repo_working_dir
+            self.allow_git_tools = allow_git_tools
             
             # Track instance counts for each role to generate unique names
             self.role_instance_counts: Dict[str, int] = {}
@@ -510,6 +749,118 @@ class CentralCoordinator:
                 return agent_config
         return None
     
+    def _is_git_repository(self) -> bool:
+        """
+        Check if the current working directory is a git repository.
+        
+        Returns:
+            True if .git directory exists, False otherwise
+        """
+        work_dir = self.filesystem.get_work_directory()
+        if not isinstance(work_dir, (str, bytes, os.PathLike)):
+            return False
+        git_dir = os.path.join(work_dir, ".git")
+        return os.path.exists(git_dir) and os.path.isdir(git_dir)
+    
+    def _get_current_git_branch(self) -> Optional[str]:
+            """
+            Get the current git branch name.
+        
+            Returns:
+                Branch name or None if not in a git repo or on error
+            """
+            if not self._is_git_repository():
+                return None
+        
+            try:
+                work_dir = self.filesystem.get_work_directory()
+                result = subprocess.run(
+                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    cwd=work_dir,
+                )
+                if result.returncode == 0:
+                    return result.stdout.strip()
+            except Exception as e:
+                logger.debug(f"Failed to get current git branch: {e}")
+        
+            return None
+    
+    def _finalize_git_workflow(self) -> None:
+            """
+            Push the current branch and create a pull request if applicable.
+        
+            This is called at the end of assign_and_execute after all tasks complete.
+            Only executes if:
+            - Working in a git repository
+            - Current branch is not a default branch (main, master, develop)
+            - Git tools are allowed
+            """
+            if not self.allow_git_tools:
+                logger.debug("Git tools disabled, skipping git finalization")
+                return
+        
+            branch_name = self._get_current_git_branch()
+            if not branch_name:
+                logger.debug("Not in a git repository, skipping git finalization")
+                return
+        
+            # Skip if on a default branch
+            default_branches = {"main", "master", "develop", "development"}
+            if branch_name in default_branches:
+                logger.debug(f"On default branch '{branch_name}', skipping git finalization")
+                return
+        
+            logger.info("=" * 80)
+            logger.info("GIT WORKFLOW FINALIZATION")
+            logger.info("=" * 80)
+            logger.info(f"Current branch: {branch_name}")
+        
+            work_dir = self.filesystem.get_work_directory()
+            tools = AgentTools(working_dir=work_dir)
+        
+            # Step 1: Push the branch
+            try:
+                logger.info(f"Pushing branch '{branch_name}' to remote...")
+                push_result = tools.push_branch(repo_dir=".", branch_name=branch_name)
+                if push_result.get("success"):
+                    logger.info(f"✓ Branch pushed to {push_result.get('remote', 'origin')}")
+                else:
+                    logger.warning("Branch push reported failure")
+                    return
+            except Exception as e:
+                logger.warning(f"Failed to push branch: {e}")
+                logger.info("Skipping pull request creation due to push failure")
+                return
+        
+            # Step 2: Create pull request
+            try:
+                logger.info("Creating pull request...")
+                pr_result = tools.create_pull_request(
+                    repo_dir=".",
+                    title=None,  # Will auto-generate from branch name
+                    body="Automated pull request created by Ouroboros agent system.",
+                    base_branch="main"
+                )
+            
+                if pr_result.get("success"):
+                    if pr_result.get("already_exists"):
+                        logger.info("✓ Pull request already exists for this branch")
+                    else:
+                        pr_url = pr_result.get("pr_url", "unknown")
+                        logger.info(f"✓ Pull request created: {pr_url}")
+                else:
+                    logger.warning("Pull request creation reported failure")
+            except Exception as e:
+                logger.warning(f"Failed to create pull request: {e}")
+                logger.info("This may be expected if GitHub CLI is not installed or configured")
+        
+            logger.info("=" * 80)
+    
+    
+    
     def _create_agent_for_role(self, role: str) -> Agent:
         """
         Create an agent instance for a specific role.
@@ -528,6 +879,28 @@ class CentralCoordinator:
         config = self._find_agent_config(role)
         if not config:
             raise OrganizationError(f"No agent configured for role: {role}")
+
+        config_copy = dict(config)
+        if not self.allow_git_tools:
+            git_tools = {"clone_repo", "checkout_branch"}
+            allowed_tools = config_copy.get("allowed_tools")
+            if allowed_tools is None:
+                allowed_tools = [tool for tool in AgentTools.TOOL_METHODS if tool not in git_tools]
+            else:
+                allowed_tools = [tool for tool in allowed_tools if tool not in git_tools]
+            config_copy["allowed_tools"] = allowed_tools
+        
+        # If creating a manager in a git repository, append branch management instruction
+        if role == "manager" and self._is_git_repository():
+            original_prompt = config_copy.get("system_prompt", "")
+            branch_instruction = (
+                "\n\nBRANCH MANAGEMENT: You are working in a git repository. "
+                "You MUST checkout a new branch using checkout_branch() BEFORE assigning any tasks. "
+                "Use a short, descriptive branch name following snake_case convention "
+                "(e.g., 'add_auth_module', 'fix_logging_bug', 'refactor_config'). "
+                "This prevents conflicts between developers and auditors working on different tasks."
+            )
+            config_copy["system_prompt"] = f"{original_prompt}{branch_instruction}"
         
         # Increment instance count for this role
         if role not in self.role_instance_counts:
@@ -535,7 +908,7 @@ class CentralCoordinator:
         self.role_instance_counts[role] += 1
         
         return Agent(
-            config, 
+            config_copy,
             self.channel_factory, 
             self.filesystem,
             instance_number=self.role_instance_counts[role]
@@ -882,8 +1255,10 @@ If any critical deliverables are missing or incomplete, report this as a BLOCKER
             logger.info(f"Request processing complete with {len(results)} results")
             logger.info(f"Callbacks recorded: {len(self.callbacks)} total")
             
-            return results
+            # Step 6: Push branch and create PR if working in a git repository
+            self._finalize_git_workflow()
             
+            return results
         except Exception as e:
             logger.error(f"Request processing failed: {e}")
             raise OrganizationError(f"Failed to process request: {e}")
@@ -1035,14 +1410,31 @@ If any critical deliverables are missing or incomplete, report this as a BLOCKER
                 
                 agent.callback_handler = callback_handler
             
-            result_text = agent.execute_task({
-                "user_prompt": task_description,
-            })
-            
-            # For roles that use tools, execute any tool calls in the response
-            tool_results = None
+            tool_working_dir = self.repo_working_dir or self.filesystem.working_dir
+
+            # Use agentic loop for developer and auditor roles
             if role in ["developer", "auditor"]:
-                tool_results = agent.execute_tools_from_response(result_text, working_dir=self.filesystem.working_dir)
+                logger.info(f"Starting agentic loop for {role}: {agent.name}")
+                agentic_result = agent.execute_with_agentic_loop(
+                    {"user_prompt": task_description},
+                    working_dir=tool_working_dir,
+                    max_iterations=15
+                )
+                
+                result_text = agentic_result["final_response"]
+                tool_results = {
+                    "tools_executed": True,
+                    "iteration_count": agentic_result["iteration_count"],
+                    "task_complete": agentic_result["task_complete"],
+                    "all_tool_results": agentic_result["tool_results"]
+                }
+            else:
+                # Manager and other roles use simple single execution
+                result_text = agent.execute_task({
+                    "user_prompt": task_description,
+                })
+                tool_results = None
+
             
             # Record task completion event
             self.filesystem.record_event(
@@ -1146,6 +1538,13 @@ For more information, see documentation in docs/
         default=None,
         help='Path to shared repository directory for session outputs (default: ../shared_repo or ./shared_repo)'
     )
+
+    parser.add_argument(
+        '--repo',
+        metavar='URL_OR_PATH',
+        default=None,
+        help='Git repository URL or local path to clone/use for this run'
+    )
     
     parser.add_argument(
         '--verbose', '-v',
@@ -1197,6 +1596,26 @@ For more information, see documentation in docs/
         except FileSystemError as e:
             logger.error(f"Filesystem initialization failed: {e}")
             sys.exit(1)
+
+        repo_working_dir = None
+        allow_git_tools = False
+        if args.repo:
+            try:
+                if os.path.isdir(args.repo) and os.path.isdir(os.path.join(args.repo, ".git")):
+                    repo_working_dir = os.path.abspath(args.repo)
+                    allow_git_tools = True
+                    logger.info(f"Using local repository: {repo_working_dir}")
+                else:
+                    tools = AgentTools(working_dir=filesystem.src_dir, allowed_tools=["clone_repo"])
+                    clone_result = tools.clone_repo(args.repo)
+                    repo_working_dir = clone_result["absolute_path"]
+                    allow_git_tools = True
+                    logger.info(f"Cloned repository to: {repo_working_dir}")
+            except (ToolError, FileSystemError) as e:
+                logger.error(f"Repository setup failed: {e}")
+                sys.exit(1)
+        else:
+            logger.info("No repository provided; git tools disabled")
         
         # Initialize coordinator
         try:
@@ -1204,6 +1623,8 @@ For more information, see documentation in docs/
                 config_path=roles_path,
                 filesystem=filesystem,
                 replay_mode=replay_mode,
+                repo_working_dir=repo_working_dir,
+                allow_git_tools=allow_git_tools,
             )
         except OrganizationError as e:
             logger.error(f"Coordinator initialization failed: {e}")

@@ -91,8 +91,8 @@ class TestAuditorRole(unittest.TestCase):
             
             manager_prompt = config["manager"]["system_prompt"]
             
-            # Verify example shows auditor with sequence 3 (after developers)
-            self.assertIn('sequence": 3', manager_prompt)
+            # Verify example shows auditor with sequence 1 (after developers with sequence 0)
+            self.assertIn('sequence": 1', manager_prompt)
             self.assertIn('"role": "auditor"', manager_prompt)
 
 

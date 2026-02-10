@@ -9,6 +9,8 @@ import tempfile
 import os
 import json
 import difflib
+import subprocess
+from unittest import mock
 from pathlib import Path
 
 from agent_tools import (
@@ -17,6 +19,7 @@ from agent_tools import (
     PathError,
     FileSizeError,
     PackageError,
+    GitError,
     get_tools,
 )
 
@@ -245,6 +248,50 @@ class TestFileEditing(unittest.TestCase):
         
         with self.assertRaises(ToolError):
             self.tools.edit_file("test.txt", diff)
+
+
+class TestCodeExecution(unittest.TestCase):
+    """Test code execution tools."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.tools = AgentTools(working_dir=self.temp_dir)
+
+    def tearDown(self):
+        """Clean up."""
+        import shutil
+        shutil.rmtree(self.temp_dir)
+
+    @mock.patch("code_runner.subprocess.run")
+    def test_run_python_writes_log(self, mock_run):
+        """Should execute Python and write log output when log_path is provided."""
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=["python", "temp.py"],
+            returncode=0,
+            stdout="ok\n",
+            stderr="",
+        )
+
+        result = self.tools.run_python("print('ok')", log_path="logs/output.txt")
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["exit_code"], 0)
+        self.assertFalse(result["timed_out"])
+        self.assertEqual(result["stdout"], "ok\n")
+        self.assertIn("log_path", result)
+
+        log_path = os.path.join(self.temp_dir, "logs", "output.txt")
+        self.assertTrue(os.path.exists(log_path))
+        with open(log_path, "r", encoding="utf-8") as handle:
+            content = handle.read()
+        self.assertIn("STDOUT:", content)
+        self.assertIn("ok", content)
+
+    def test_run_python_rejects_invalid_log_path(self):
+        """Should reject log paths that escape working directory."""
+        with self.assertRaises(PathError):
+            self.tools.run_python("print('ok')", log_path="../outside.txt")
 
 
 class TestFileSearch(unittest.TestCase):
@@ -527,6 +574,276 @@ class TestPackageManagement(unittest.TestCase):
         from agent_tools import PackageError
         with self.assertRaises(PackageError):
             self.tools.install_package("package;rm -rf /", language="python")
+
+
+class TestGitOperations(unittest.TestCase):
+    """Test git operations."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.tools = AgentTools(working_dir=self.temp_dir)
+
+    def tearDown(self):
+        """Clean up temporary directory."""
+        import shutil
+        shutil.rmtree(self.temp_dir)
+
+    def test_clone_repo_derives_directory_name(self):
+        """Should derive destination directory from repo URL."""
+        repo_url = "https://github.com/example/repo.git"
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+        with mock.patch("agent_tools.subprocess.run", return_value=completed) as mocked_run:
+            result = self.tools.clone_repo(repo_url)
+
+        self.assertEqual(result["path"], "repo")
+        called_cmd = mocked_run.call_args[0][0]
+        self.assertIn("git", called_cmd)
+        self.assertIn("clone", called_cmd)
+        self.assertTrue(called_cmd[-1].endswith(os.path.join(self.temp_dir, "repo")))
+
+    def test_clone_repo_with_branch_and_depth(self):
+        """Should pass branch and depth arguments to git clone."""
+        repo_url = "https://github.com/example/repo.git"
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+        with mock.patch("agent_tools.subprocess.run", return_value=completed) as mocked_run:
+            result = self.tools.clone_repo(repo_url, branch="master", depth=1)
+
+        self.assertTrue(result["success"])
+        called_cmd = mocked_run.call_args[0][0]
+        self.assertIn("--branch", called_cmd)
+        self.assertIn("master", called_cmd)
+        self.assertIn("--single-branch", called_cmd)
+        self.assertIn("--depth", called_cmd)
+        self.assertIn("1", called_cmd)
+
+    def test_clone_repo_rejects_nonempty_destination(self):
+        """Should reject cloning into a non-empty directory."""
+        os.makedirs(os.path.join(self.temp_dir, "repo"), exist_ok=True)
+        with open(os.path.join(self.temp_dir, "repo", "file.txt"), "w", encoding="utf-8") as f:
+            f.write("data")
+
+        with self.assertRaises(ToolError):
+            self.tools.clone_repo("https://github.com/example/repo.git", dest_dir="repo")
+
+    def test_clone_repo_invalid_depth(self):
+        """Should reject invalid depth values."""
+        with self.assertRaises(ToolError):
+            self.tools.clone_repo("https://github.com/example/repo.git", depth=0)
+
+
+class TestGitCheckoutBranch(unittest.TestCase):
+    """Test git branch checkout operations."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.tools = AgentTools(working_dir=self.temp_dir)
+
+    def tearDown(self):
+        """Clean up temporary directory."""
+        import shutil
+        shutil.rmtree(self.temp_dir)
+
+    def test_checkout_branch_creates_new_branch(self):
+        """Should create and checkout a new branch."""
+        # Create a mock git repo directory
+        repo_dir = os.path.join(self.temp_dir, "test_repo")
+        os.makedirs(os.path.join(repo_dir, ".git"), exist_ok=True)
+
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+        with mock.patch("agent_tools.subprocess.run", return_value=completed) as mocked_run:
+            result = self.tools.checkout_branch("test_repo", "task_123_implement_feature")
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["branch_name"], "task_123_implement_feature")
+        self.assertTrue(result["created"])
+        
+        called_cmd = mocked_run.call_args[0][0]
+        self.assertIn("git", called_cmd)
+        self.assertIn("checkout", called_cmd)
+        self.assertIn("-b", called_cmd)
+        self.assertIn("task_123_implement_feature", called_cmd)
+
+    def test_checkout_existing_branch(self):
+        """Should checkout existing branch without creating."""
+        repo_dir = os.path.join(self.temp_dir, "test_repo")
+        os.makedirs(os.path.join(repo_dir, ".git"), exist_ok=True)
+
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+        with mock.patch("agent_tools.subprocess.run", return_value=completed) as mocked_run:
+            result = self.tools.checkout_branch("test_repo", "existing_branch", create=False)
+
+        self.assertTrue(result["success"])
+        self.assertFalse(result["created"])
+        
+        called_cmd = mocked_run.call_args[0][0]
+        self.assertNotIn("-b", called_cmd)
+
+    def test_checkout_branch_invalid_name(self):
+        """Should reject invalid branch names."""
+        repo_dir = os.path.join(self.temp_dir, "test_repo")
+        os.makedirs(os.path.join(repo_dir, ".git"), exist_ok=True)
+
+        # Branch names with invalid characters
+        with self.assertRaises(ToolError):
+            self.tools.checkout_branch("test_repo", "invalid branch name")
+        
+        with self.assertRaises(ToolError):
+            self.tools.checkout_branch("test_repo", "branch@name")
+
+    def test_checkout_branch_not_a_repo(self):
+        """Should reject checkout in non-git directory."""
+        repo_dir = os.path.join(self.temp_dir, "not_a_repo")
+        os.makedirs(repo_dir, exist_ok=True)
+
+        with self.assertRaises(GitError):
+            self.tools.checkout_branch("not_a_repo", "task_123_test")
+
+    def test_checkout_branch_repo_not_found(self):
+        """Should raise error if repository directory doesn't exist."""
+        with self.assertRaises(ToolError):
+            self.tools.checkout_branch("nonexistent_repo", "task_123_test")
+
+
+class TestGitPushBranch(unittest.TestCase):
+    """Test git branch push operations."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.tools = AgentTools(working_dir=self.temp_dir)
+
+    def tearDown(self):
+        """Clean up temporary directory."""
+        import shutil
+        shutil.rmtree(self.temp_dir)
+
+    def test_push_branch_uses_current_branch(self):
+        """Should push current branch when branch name not provided."""
+        repo_dir = os.path.join(self.temp_dir, "test_repo")
+        os.makedirs(os.path.join(repo_dir, ".git"), exist_ok=True)
+
+        completed_rev = subprocess.CompletedProcess(args=[], returncode=0, stdout="feature/test\n", stderr="")
+        completed_remote = subprocess.CompletedProcess(args=[], returncode=0, stdout="origin\n", stderr="")
+        completed_push = subprocess.CompletedProcess(args=[], returncode=0, stdout="pushed\n", stderr="")
+
+        with mock.patch("agent_tools.subprocess.run", side_effect=[
+            completed_rev,
+            completed_remote,
+            completed_push,
+        ]) as mocked_run:
+            result = self.tools.push_branch("test_repo")
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["branch_name"], "feature/test")
+        self.assertEqual(result["remote"], "origin")
+
+        push_cmd = mocked_run.call_args_list[-1][0][0]
+        self.assertIn("git", push_cmd)
+        self.assertIn("push", push_cmd)
+        self.assertIn("-u", push_cmd)
+        self.assertIn("origin", push_cmd)
+        self.assertIn("feature/test", push_cmd)
+
+    def test_push_branch_no_remote(self):
+        """Should raise GitError when no remote is configured."""
+        repo_dir = os.path.join(self.temp_dir, "test_repo")
+        os.makedirs(os.path.join(repo_dir, ".git"), exist_ok=True)
+
+        completed_rev = subprocess.CompletedProcess(args=[], returncode=0, stdout="feature/test\n", stderr="")
+        completed_remote = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+        with mock.patch("agent_tools.subprocess.run", side_effect=[
+            completed_rev,
+            completed_remote,
+        ]):
+            with self.assertRaises(GitError):
+                self.tools.push_branch("test_repo")
+
+
+class TestGitCreatePullRequest(unittest.TestCase):
+    """Test git pull request creation operations."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.tools = AgentTools(working_dir=self.temp_dir)
+
+    def tearDown(self):
+        """Clean up temporary directory."""
+        import shutil
+        shutil.rmtree(self.temp_dir)
+
+    def test_create_pull_request_success(self):
+        """Should create a pull request when gh is available."""
+        repo_dir = os.path.join(self.temp_dir, "test_repo")
+        os.makedirs(os.path.join(repo_dir, ".git"), exist_ok=True)
+
+        completed_gh = subprocess.CompletedProcess(args=[], returncode=0, stdout="gh version 2.0\n", stderr="")
+        completed_rev = subprocess.CompletedProcess(args=[], returncode=0, stdout="feature_add\n", stderr="")
+        completed_pr = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="https://github.com/example/repo/pull/1\n",
+            stderr="",
+        )
+
+        with mock.patch("agent_tools.subprocess.run", side_effect=[
+            completed_gh,
+            completed_rev,
+            completed_pr,
+        ]) as mocked_run:
+            result = self.tools.create_pull_request("test_repo", base_branch="main")
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["pr_url"], "https://github.com/example/repo/pull/1")
+
+        pr_cmd = mocked_run.call_args_list[-1][0][0]
+        self.assertIn("gh", pr_cmd)
+        self.assertIn("pr", pr_cmd)
+        self.assertIn("create", pr_cmd)
+        self.assertIn("--head", pr_cmd)
+        self.assertIn("feature_add", pr_cmd)
+        self.assertIn("--base", pr_cmd)
+        self.assertIn("main", pr_cmd)
+
+    def test_create_pull_request_already_exists(self):
+        """Should return success when PR already exists."""
+        repo_dir = os.path.join(self.temp_dir, "test_repo")
+        os.makedirs(os.path.join(repo_dir, ".git"), exist_ok=True)
+
+        completed_gh = subprocess.CompletedProcess(args=[], returncode=0, stdout="gh version 2.0\n", stderr="")
+        completed_rev = subprocess.CompletedProcess(args=[], returncode=0, stdout="feature_add\n", stderr="")
+        completed_pr = subprocess.CompletedProcess(
+            args=[],
+            returncode=1,
+            stdout="",
+            stderr="A pull request already exists for branch feature_add",
+        )
+
+        with mock.patch("agent_tools.subprocess.run", side_effect=[
+            completed_gh,
+            completed_rev,
+            completed_pr,
+        ]):
+            result = self.tools.create_pull_request("test_repo", base_branch="main")
+
+        self.assertTrue(result["success"])
+        self.assertTrue(result.get("already_exists"))
+
+    def test_create_pull_request_missing_gh(self):
+        """Should raise GitError when GitHub CLI is missing."""
+        repo_dir = os.path.join(self.temp_dir, "test_repo")
+        os.makedirs(os.path.join(repo_dir, ".git"), exist_ok=True)
+
+        with mock.patch("agent_tools.subprocess.run", side_effect=FileNotFoundError()):
+            with self.assertRaises(GitError):
+                self.tools.create_pull_request("test_repo")
 
 
 if __name__ == "__main__":

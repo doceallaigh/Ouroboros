@@ -17,7 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from main import CentralCoordinator
-from filesystem import Filesystem
+from filesystem import FileSystem
 
 
 def test_callback_mechanism():
@@ -27,7 +27,7 @@ def test_callback_mechanism():
     print("=" * 60)
     
     # Create filesystem for test
-    fs = Filesystem(replay_mode=False)
+    fs = FileSystem(replay_mode=False)
     print(f"\n✓ Created test session: {fs.session_id}")
     print(f"  Working directory: {fs.working_dir}")
     

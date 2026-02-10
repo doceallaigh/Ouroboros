@@ -52,6 +52,10 @@ def sanitize_output(content: str, max_length: int = 50000) -> str:
     if not isinstance(content, str):
         raise ValidationError(f"Expected string content, got {type(content)}")
     
+    # Remove thinking tags (extract content after </think> tag)
+    if "</think>" in content:
+        content = content.split("</think>", 1)[1]
+    
     # Truncate if too long
     if len(content) > max_length:
         logger.warning(f"Content truncated from {len(content)} to {max_length} chars")

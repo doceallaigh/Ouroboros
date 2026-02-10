@@ -69,6 +69,7 @@ class TestAgent(MockedNetworkTestCase):
         self.mock_channel_factory = Mock()
         self.mock_filesystem = Mock()
         self.mock_channel = Mock()
+        self.mock_channel.config = {}  # Add config dict for endpoint assignment
         self.mock_channel_factory.create_channel.return_value = self.mock_channel
 
     def test_initialization_with_instance_number(self):
@@ -224,6 +225,86 @@ class TestAgent(MockedNetworkTestCase):
                 self.assertEqual(payload["model"], "gpt-3.5")
                 self.assertEqual(payload["temperature"], 0.7)
 
+    def test_execute_tools_from_response_clone_repo_default_branch(self):
+        """Should inject default git branch when clone_repo omits branch."""
+        config = {
+            "role": "developer",
+            "system_prompt": "You are a developer",
+            "allowed_tools": ["clone_repo"],
+            "default_git_branch": "master",
+        }
+        agent = Agent(config, self.mock_channel_factory, self.mock_filesystem, instance_number=1)
+
+        response = """```python
+clone_repo('https://example.com/repo.git')
+```"""
+
+        mock_tools = Mock()
+        for name in [
+            "read_file",
+            "write_file",
+            "append_file",
+            "edit_file",
+            "list_directory",
+            "list_all_files",
+            "search_files",
+            "get_file_info",
+            "delete_file",
+            "audit_files",
+        ]:
+            setattr(mock_tools, name, Mock())
+        mock_tools.clone_repo = Mock(return_value={"success": True})
+
+        with patch("main.AgentTools", return_value=mock_tools):
+            agent.execute_tools_from_response(response, working_dir=".")
+
+        mock_tools.clone_repo.assert_called_once_with(
+            "https://example.com/repo.git",
+            dest_dir=None,
+            branch="master",
+            depth=None,
+        )
+
+    def test_execute_tools_from_response_clone_repo_branch_override(self):
+        """Should respect explicit branch for clone_repo."""
+        config = {
+            "role": "developer",
+            "system_prompt": "You are a developer",
+            "allowed_tools": ["clone_repo"],
+            "default_git_branch": "master",
+        }
+        agent = Agent(config, self.mock_channel_factory, self.mock_filesystem, instance_number=1)
+
+        response = """```python
+clone_repo('https://example.com/repo.git', branch='dev')
+```"""
+
+        mock_tools = Mock()
+        for name in [
+            "read_file",
+            "write_file",
+            "append_file",
+            "edit_file",
+            "list_directory",
+            "list_all_files",
+            "search_files",
+            "get_file_info",
+            "delete_file",
+            "audit_files",
+        ]:
+            setattr(mock_tools, name, Mock())
+        mock_tools.clone_repo = Mock(return_value={"success": True})
+
+        with patch("main.AgentTools", return_value=mock_tools):
+            agent.execute_tools_from_response(response, working_dir=".")
+
+        mock_tools.clone_repo.assert_called_once_with(
+            "https://example.com/repo.git",
+            dest_dir=None,
+            branch="dev",
+            depth=None,
+        )
+
 
 class TestCentralCoordinator(MockedNetworkTestCase):
     """Test cases for CentralCoordinator class."""
@@ -298,6 +379,34 @@ class TestCentralCoordinator(MockedNetworkTestCase):
                 
                 # Verify Agent was instantiated with correct config
                 mock_agent_class.assert_called_once()
+
+    @patch('builtins.open')
+    def test_create_agent_filters_git_tools_when_disabled(self, mock_open):
+        """Should remove git tools from allowed_tools when repo is not provided."""
+        config_with_tools = {
+            **self.config,
+            "developer": {
+                "role": "developer",
+                "system_prompt": "Write code",
+                "allowed_tools": ["read_file", "clone_repo", "checkout_branch"],
+            }
+        }
+        
+        with patch('main.json.load', return_value=config_with_tools):
+            with patch('main.Agent') as mock_agent_class:
+                coordinator = CentralCoordinator(
+                    self.config_path,
+                    self.mock_filesystem,
+                    allow_git_tools=False
+                )
+                
+                coordinator._create_agent_for_role("developer")
+                
+                passed_config = mock_agent_class.call_args[0][0]
+                self.assertIn("allowed_tools", passed_config)
+                self.assertNotIn("clone_repo", passed_config["allowed_tools"])
+                self.assertNotIn("checkout_branch", passed_config["allowed_tools"])
+                self.assertIn("read_file", passed_config["allowed_tools"])
 
     @patch('builtins.open')
     def test_create_agent_for_missing_role(self, mock_open):
@@ -381,10 +490,49 @@ class TestCentralCoordinator(MockedNetworkTestCase):
                 
                 coordinator = CentralCoordinator(self.config_path, self.mock_filesystem)
                 
+                # Mock both assignment execution and final auditor verification
                 with patch.object(coordinator, '_execute_assignments', return_value=[]):
-                    results = coordinator.assign_and_execute("Build something")
-                    
-                    self.assertIsNotNone(results)
+                    with patch.object(coordinator, '_execute_single_assignment', return_value={
+                        "role": "auditor",
+                        "status": "completed",
+                        "output": "Verification passed"
+                    }):
+                        results = coordinator.assign_and_execute("Build something")
+                        
+                        self.assertIsNotNone(results)
+
+    @patch('builtins.open')
+    def test_assign_and_execute_triggers_git_finalization(self, mock_open):
+        """Should call git finalization at end of request processing."""
+        with patch('main.json.load', return_value=self.config):
+            coordinator = CentralCoordinator(self.config_path, self.mock_filesystem)
+
+            with patch.object(coordinator, 'decompose_request', return_value="[]"):
+                with patch.object(coordinator, '_execute_assignments', return_value=[]):
+                    with patch.object(coordinator, '_create_final_verification_task', return_value={
+                        "role": "auditor",
+                        "task": "Review work",
+                    }):
+                        with patch.object(coordinator, '_execute_single_assignment', return_value={
+                            "role": "auditor",
+                            "status": "completed",
+                            "output": "Verification passed"
+                        }):
+                            with patch.object(coordinator, '_get_blocker_callbacks', return_value=[]):
+                                with patch.object(coordinator, '_finalize_git_workflow') as mock_finalize:
+                                    coordinator.assign_and_execute("Build something")
+                                    mock_finalize.assert_called_once()
+
+    @patch('builtins.open')
+    def test_finalize_git_workflow_skips_default_branch(self, mock_open):
+        """Should skip git finalization on default branches."""
+        with patch('main.json.load', return_value=self.config):
+            coordinator = CentralCoordinator(self.config_path, self.mock_filesystem)
+
+            with patch.object(coordinator, '_get_current_git_branch', return_value="main"):
+                with patch('main.AgentTools') as mock_tools_class:
+                    coordinator._finalize_git_workflow()
+                    mock_tools_class.assert_not_called()
 
     @patch('builtins.open')
     def test_assign_and_execute_decomposition_failure(self, mock_open):
@@ -417,12 +565,17 @@ class TestCentralCoordinator(MockedNetworkTestCase):
                 
                 # Should succeed after retry with valid JSON
                 with patch.object(coordinator, '_execute_assignments', return_value=[]) as mock_execute:
-                    results = coordinator.assign_and_execute("Build something")
-                    
-                    # Verify it was called (indicating successful parsing)
-                    mock_execute.assert_called_once()
-                    # Verify manager was called twice (initial + 1 retry)
-                    self.assertEqual(mock_agent.execute_task.call_count, 2)
+                    with patch.object(coordinator, '_execute_single_assignment', return_value={
+                        "role": "auditor",
+                        "status": "completed",
+                        "output": "Verification passed"
+                    }):
+                        results = coordinator.assign_and_execute("Build something")
+                        
+                        # Verify it was called (indicating successful parsing)
+                        mock_execute.assert_called_once()
+                        # Verify manager was called twice (initial + 1 retry)
+                        self.assertEqual(mock_agent.execute_task.call_count, 2)
 
     @patch('builtins.open')
     def test_assign_and_execute_malformed_json_max_retries(self, mock_open):
@@ -494,7 +647,13 @@ class TestCentralCoordinator(MockedNetworkTestCase):
         with patch('main.json.load', return_value=self.config):
             with patch('main.Agent') as mock_agent_class:
                 mock_agent = Mock()
-                mock_agent.execute_task.return_value = "Task output"
+                # Developer role uses agentic loop, so mock that instead
+                mock_agent.execute_with_agentic_loop.return_value = {
+                    "final_response": "Task output",
+                    "iteration_count": 1,
+                    "task_complete": True,
+                    "tool_results": []
+                }
                 mock_agent_class.return_value = mock_agent
                 
                 coordinator = CentralCoordinator(self.config_path, self.mock_filesystem)
@@ -657,8 +816,13 @@ class TestCallbackMechanism(MockedNetworkTestCase):
             try:
                 with patch.object(coordinator, '_create_agent_for_role') as mock_create:
                     mock_agent = Mock()
-                    mock_agent.execute_task.return_value = "Test output"
-                    mock_agent.execute_tools_from_response.return_value = {"tools_executed": False}
+                    # Developer role uses agentic loop
+                    mock_agent.execute_with_agentic_loop.return_value = {
+                        "final_response": "Test output",
+                        "iteration_count": 1,
+                        "task_complete": True,
+                        "tool_results": []
+                    }
                     mock_agent.name = "developer01"
                     mock_create.return_value = mock_agent
                     
@@ -697,6 +861,243 @@ class TestOrganizationError(MockedNetworkTestCase):
             raise OrganizationError("Agent not found")
         except OrganizationError as e:
             self.assertIn("Agent not found", str(e))
+
+
+class TestAgenticLoop(MockedNetworkTestCase):
+    """Test cases for agentic loop execution."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.config = {
+            "role": "developer",
+            "system_prompt": "You are a developer",
+            "model": "gpt-3.5",
+            "temperature": 0.7,
+            "max_tokens": 1000,
+        }
+        self.mock_channel_factory = Mock()
+        self.mock_filesystem = Mock()
+        self.mock_channel = Mock()
+        self.mock_channel_factory.create_channel.return_value = self.mock_channel
+        self.working_dir = "/tmp/test_working"
+
+    def test_single_iteration_with_completion(self):
+        """Should complete in single iteration when agent confirms completion."""
+        agent = Agent(self.config, self.mock_channel_factory, self.mock_filesystem, instance_number=1)
+        
+        # Mock agent response with confirm_task_complete tool call
+        completion_response = "Task done!\n```python\nconfirm_task_complete()\n```"
+        
+        def mock_execute_with_history(conversation_history):
+            return completion_response
+        
+        def mock_execute_tools(response, working_dir):
+            # Return proper dict structure with task_complete flag
+            return {
+                "tools_executed": True,
+                "results": [{"success": True, "code_executed": 32}],
+                "code_blocks_found": 1,
+                "code_blocks_executed": 1,
+                "estimated_tool_calls": 1,
+                "task_complete": True
+            }
+        
+        with patch.object(agent, '_execute_with_conversation_history', side_effect=mock_execute_with_history):
+            with patch.object(agent, 'execute_tools_from_response', side_effect=mock_execute_tools):
+                result = agent.execute_with_agentic_loop(
+                    {"user_prompt": "Do something"},
+                    working_dir=self.working_dir,
+                    max_iterations=5
+                )
+                
+                self.assertTrue(result["task_complete"])
+                self.assertEqual(result["iteration_count"], 1)
+                self.assertIn("Task done!", result["final_response"])
+
+    def test_multiple_iterations_before_completion(self):
+        """Should iterate multiple times before completion."""
+        agent = Agent(self.config, self.mock_channel_factory, self.mock_filesystem, instance_number=1)
+        
+        # Mock responses for multiple iterations
+        responses = [
+            "Working on it...\n```python\nread_file('test.py')\n```",  # Iteration 1
+            "Still working...\n```python\nwrite_file('test.py', 'content')\n```",  # Iteration 2
+            "Done!\n```python\nconfirm_task_complete()\n```",  # Iteration 3
+        ]
+        
+        call_count = [0]
+        
+        def mock_execute_with_history(conversation_history):
+            response = responses[call_count[0]]
+            call_count[0] += 1
+            return response
+        
+        def mock_execute_tools(response, working_dir):
+            if "confirm_task_complete" in response:
+                return {
+                    "tools_executed": True,
+                    "results": [{"success": True, "code_executed": 32}],
+                    "code_blocks_found": 1,
+                    "code_blocks_executed": 1,
+                    "estimated_tool_calls": 1,
+                    "task_complete": True
+                }
+            return {
+                "tools_executed": True,
+                "results": [{"success": True, "code_executed": 20}],
+                "code_blocks_found": 1,
+                "code_blocks_executed": 1,
+                "estimated_tool_calls": 1,
+                "task_complete": False
+            }
+        
+        with patch.object(agent, '_execute_with_conversation_history', side_effect=mock_execute_with_history):
+            with patch.object(agent, 'execute_tools_from_response', side_effect=mock_execute_tools):
+                result = agent.execute_with_agentic_loop(
+                    {"user_prompt": "Do something"},
+                    working_dir=self.working_dir,
+                    max_iterations=10
+                )
+                
+                self.assertTrue(result["task_complete"])
+                self.assertEqual(result["iteration_count"], 3)
+                self.assertIn("Done!", result["final_response"])
+
+    def test_max_iterations_reached(self):
+        """Should stop at max iterations without completion."""
+        agent = Agent(self.config, self.mock_channel_factory, self.mock_filesystem, instance_number=1)
+        
+        def mock_execute_with_history(conversation_history):
+            return "Still working...\n```python\nread_file('test.py')\n```"
+        
+        def mock_execute_tools(response, working_dir):
+            return {
+                "tools_executed": True,
+                "results": [{"success": True, "code_executed": 20}],
+                "code_blocks_found": 1,
+                "code_blocks_executed": 1,
+                "estimated_tool_calls": 1,
+                "task_complete": False
+            }
+        
+        with patch.object(agent, '_execute_with_conversation_history', side_effect=mock_execute_with_history):
+            with patch.object(agent, 'execute_tools_from_response', side_effect=mock_execute_tools):
+                result = agent.execute_with_agentic_loop(
+                    {"user_prompt": "Do something"},
+                    working_dir=self.working_dir,
+                    max_iterations=3
+                )
+                
+                self.assertFalse(result["task_complete"])
+                self.assertEqual(result["iteration_count"], 3)
+                self.assertIn("Still working...", result["final_response"])
+
+    def test_tool_results_included_in_feedback(self):
+        """Should include tool results in feedback to agent."""
+        agent = Agent(self.config, self.mock_channel_factory, self.mock_filesystem, instance_number=1)
+        
+        first_call = [True]
+        
+        def mock_execute_with_history(conversation_history):
+            # Check that tool results were added to conversation after first iteration
+            if not first_call[0]:
+                # After first iteration, should have system, user, assistant, user (tool results)
+                self.assertGreaterEqual(len(conversation_history), 4)
+                last_message = conversation_history[-1]
+                self.assertEqual(last_message["role"], "user")
+                # Check for formatted tool results in the message
+                self.assertIn("Tool execution results", last_message["content"])
+                self.assertIn("code blocks", last_message["content"])
+                return "Done!\n```python\nconfirm_task_complete()\n```"
+            
+            first_call[0] = False
+            return "Working...\n```python\nread_file('test.py')\n```"
+        
+        def mock_execute_tools(response, working_dir):
+            if "confirm_task_complete" in response:
+                return {
+                    "tools_executed": True,
+                    "results": [{"success": True, "code_executed": 32}],
+                    "code_blocks_found": 1,
+                    "code_blocks_executed": 1,
+                    "estimated_tool_calls": 1,
+                    "task_complete": True
+                }
+            return {
+                "tools_executed": True,
+                "results": [{"success": True, "code_executed": 20}],
+                "code_blocks_found": 1,
+                "code_blocks_executed": 1,
+                "estimated_tool_calls": 1,
+                "task_complete": False
+            }
+        
+        with patch.object(agent, '_execute_with_conversation_history', side_effect=mock_execute_with_history):
+            with patch.object(agent, 'execute_tools_from_response', side_effect=mock_execute_tools):
+                result = agent.execute_with_agentic_loop(
+                    {"user_prompt": "Do something"},
+                    working_dir=self.working_dir,
+                    max_iterations=5
+                )
+                
+                self.assertTrue(result["task_complete"])
+
+    def test_conversation_history_maintained(self):
+        """Should maintain conversation history across iterations."""
+        agent = Agent(self.config, self.mock_channel_factory, self.mock_filesystem, instance_number=1)
+        
+        iteration_count = [0]
+        
+        def mock_execute_with_history(conversation_history):
+            iteration_count[0] += 1
+            
+            # First iteration should have system + user messages
+            if iteration_count[0] == 1:
+                self.assertEqual(len(conversation_history), 2)
+                self.assertEqual(conversation_history[0]["role"], "system")
+                self.assertEqual(conversation_history[1]["role"], "user")
+            # Second iteration should have system, user, assistant, user (tool results)
+            elif iteration_count[0] == 2:
+                self.assertEqual(len(conversation_history), 4)
+                # Should have system, user, assistant, user pattern
+                self.assertEqual(conversation_history[0]["role"], "system")
+                self.assertEqual(conversation_history[1]["role"], "user")
+                self.assertEqual(conversation_history[2]["role"], "assistant") 
+                self.assertEqual(conversation_history[3]["role"], "user")
+            
+            if iteration_count[0] >= 2:
+                return "Done!\n```python\nconfirm_task_complete()\n```"
+            return "Working...\n```python\nread_file('test.py')\n```"
+        
+        def mock_execute_tools(response, working_dir):
+            if "confirm_task_complete" in response:
+                return {
+                    "tools_executed": True,
+                    "results": [{"success": True, "code_executed": 32}],
+                    "code_blocks_found": 1,
+                    "code_blocks_executed": 1,
+                    "estimated_tool_calls": 1,
+                    "task_complete": True
+                }
+            return {
+                "tools_executed": True,
+                "results": [{"success": True, "code_executed": 20}],
+                "code_blocks_found": 1,
+                "code_blocks_executed": 1,
+                "estimated_tool_calls": 1,
+                "task_complete": False
+            }
+        
+        with patch.object(agent, '_execute_with_conversation_history', side_effect=mock_execute_with_history):
+            with patch.object(agent, 'execute_tools_from_response', side_effect=mock_execute_tools):
+                result = agent.execute_with_agentic_loop(
+                    {"user_prompt": "Do something"},
+                    working_dir=self.working_dir,
+                    max_iterations=10
+                )
+                
+                self.assertTrue(result["task_complete"])
+                self.assertEqual(iteration_count[0], 2)
 
 
 if __name__ == "__main__":
