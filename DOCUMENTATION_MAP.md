@@ -40,6 +40,12 @@ OUROBOROS DOCUMENTATION
     │   ├── REFACTORING_CHANGES.md   What changed recently? What patterns to follow?
     │   ├── VERIFICATION_CHECKLIST.md How do I verify my changes?
     │   ├── CHANGE_LOG.md            Complete history of all changes
+    │   ├── PACKAGE_MANAGEMENT_TOOLS.md Tools for package search and installation
+    │   ├── TOOL_BASED_TASK_ASSIGNMENT.md Manager tool-based task assignment system
+    │   ├── TOOL_INJECTION_SUMMARY.md Tool injection and dynamic availability
+    │   ├── investigations/          Root cause analyses and incident investigations
+    │   ├── reports/                 Run-specific summaries and improvement reports
+    │   ├── testing/                 Test suite documentation and guides
     │   └── ...
     │
     └── 📚 reference/                For: Technical Specifications & Troubleshooting
@@ -170,7 +176,7 @@ docs/reference/CONFIGURATION_REFERENCE.md
 
 ### 🛠️ Developer-Facing (docs/development/)
 - **Audience**: Software developers working on the system
-- **Content**: Architecture, design decisions, refactoring details, procedures
+- **Content**: Architecture, design decisions, refactoring details, procedures, investigations, reports, and testing guides
 - **Style**: Technical, detailed, process-oriented
 - **Update Frequency**: With each change, commit-level precision
 

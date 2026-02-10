@@ -11,7 +11,7 @@
 - Review: [TEST_IMPLEMENTATION_SUMMARY.md](TEST_IMPLEMENTATION_SUMMARY.md)
 
 **Want to understand the features being tested?**
-- See: [IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md](IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md)
+- See: [docs/development/reports/IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md](../reports/IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md)
 
 ---
 
@@ -122,12 +122,12 @@
 
 ### Features Being Tested
 
-- [IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md](IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md)
+- [docs/development/reports/IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md](../reports/IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md)
   - Code changes that tests verify
   - Before/after behavior
   - Future enhancements
 
-- [ANALYSIS_RUN_20260208_222827785.md](ANALYSIS_RUN_20260208_222827785.md)
+- [docs/development/investigations/ANALYSIS_RUN_20260208_222827785.md](../investigations/ANALYSIS_RUN_20260208_222827785.md)
   - Issues being addressed
   - Root cause analysis
   - Recommendations
@@ -356,13 +356,13 @@ Check Python version (need 3.9+)
 ## Documentation Reading Order
 
 **First time**:
-1. TESTS_QUICK_START.md (5 min)
-2. TEST_IMPLEMENTATION_SUMMARY.md (10 min)
+1. [docs/development/testing/TESTS_QUICK_START.md](TESTS_QUICK_START.md) (5 min)
+2. [docs/development/testing/TEST_IMPLEMENTATION_SUMMARY.md](TEST_IMPLEMENTATION_SUMMARY.md) (10 min)
 3. Run tests to verify (2 min)
 
 **In-depth**:
-1. IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md (understand features)
-2. TEST_SUITE_DOCUMENTATION.md (understand tests)
+1. [docs/development/reports/IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md](../reports/IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md) (understand features)
+2. [docs/development/testing/TEST_SUITE_DOCUMENTATION.md](TEST_SUITE_DOCUMENTATION.md) (understand tests)
 3. Review test files (understand implementation)
 
 **Before deploying**:
@@ -397,11 +397,11 @@ D:\GitHub\Ouroboros\
 │   ├── test_callback_routing_and_retry.py      (450 lines, 25+ tests)
 │   ├── run_callback_tests.py                   (50 lines, test runner)
 │   └── main.py                                 (modified with callback features)
-├── TESTS_QUICK_START.md                        (200 lines)
-├── TEST_SUITE_DOCUMENTATION.md                 (400 lines)
-├── TEST_IMPLEMENTATION_SUMMARY.md              (300 lines)
-├── TEST_INDEX_CALLBACK_VERIFICATION.md         (this file)
-└── IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md   (related features)
+├── docs/development/testing/TESTS_QUICK_START.md                       (200 lines)
+├── docs/development/testing/TEST_SUITE_DOCUMENTATION.md                (400 lines)
+├── docs/development/testing/TEST_IMPLEMENTATION_SUMMARY.md             (300 lines)
+├── docs/development/testing/TEST_INDEX_CALLBACK_VERIFICATION.md        (this file)
+└── docs/development/reports/IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md   (related features)
 ```
 
 ---

@@ -54,6 +54,17 @@ These documents are for developers extending or modifying the Ouroboros system:
 - **Refactoring Changes** - Recent refactoring work, patterns, and lessons learned
 - **Verification Checklist** - Testing and validation procedures for changes
 - **Change Log** - Detailed history of modifications and improvements
+- **Package Management Tools** - Package search and installation functionality
+- **Tool-Based Task Assignment** - Manager task assignment system via tool calls
+- **Tool Injection Summary** - Runtime tool availability and injection mechanism
+- **Investigations** - Root cause analyses and incident investigations
+- **Reports** - Run-specific summaries and improvement reports
+- **Testing** - Component and integration test documentation
+
+**Subdirectories**:
+- [docs/development/investigations/](development/investigations/)
+- [docs/development/reports/](development/reports/)
+- [docs/development/testing/](development/testing/)
 
 **Start here if**: You are developing features, fixing bugs, or extending the system.
 
@@ -137,6 +148,9 @@ docs/
 │   ├── REFACTORING_CHANGES.md     # Recent refactoring work
 │   ├── VERIFICATION_CHECKLIST.md  # Testing procedures
 │   └── CHANGE_LOG.md              # Detailed modification history
+│   ├── investigations/            # Root cause analyses and incident investigations
+│   ├── reports/                   # Run-specific reports and summaries
+│   └── testing/                   # Test suite documentation and guides
 │
 ├── reference/
 │   ├── CALLBACK_MECHANISM.md      # Agent callback system for inter-agent communication
@@ -164,6 +178,8 @@ docs/
 - Move agent docs to `docs/agents/`
 - Move technical docs to `docs/development/`
 - Create missing reference materials
+- Keep investigation reports under `docs/development/investigations/`
+- Keep test documentation under `docs/development/testing/`
 
 ---
 

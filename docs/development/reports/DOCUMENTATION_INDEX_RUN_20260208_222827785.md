@@ -7,26 +7,26 @@ This index organizes all documentation related to the analysis of test run 20260
 ## Quick Navigation
 
 ### For Busy Executives (5 minutes)
-1. Start: **QUICK_REFERENCE.md** - 30-second overview
-2. Skim: **EXECUTIVE_SUMMARY.md** - Key metrics and recommendations
+1. Start: **[docs/development/reports/QUICK_REFERENCE.md](QUICK_REFERENCE.md)** - 30-second overview
+2. Skim: **[docs/development/reports/EXECUTIVE_SUMMARY.md](EXECUTIVE_SUMMARY.md)** - Key metrics and recommendations
 3. Done: You understand the issues and fixes
 
 ### For Technical Leads (20 minutes)
-1. Start: **ANALYSIS_RUN_20260208_222827785.md** - What happened
-2. Understand: **IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md** - How we fixed it
-3. Plan: **ACTION_PLAN_RESOLUTION.md** - What's next
+1. Start: **[docs/development/investigations/ANALYSIS_RUN_20260208_222827785.md](../investigations/ANALYSIS_RUN_20260208_222827785.md)** - What happened
+2. Understand: **[docs/development/reports/IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md](IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md)** - How we fixed it
+3. Plan: **[docs/development/reports/ACTION_PLAN_RESOLUTION.md](ACTION_PLAN_RESOLUTION.md)** - What's next
 4. Code: **src/main.py** - Actual changes
 
 ### For Developers (1-2 hours)
-1. Start: **ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md** - Why files weren't created
-2. Understand: **IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md** - How callbacks work
-3. Reference: **ACTION_PLAN_RESOLUTION.md** - Phase-by-phase implementation
+1. Start: **[docs/development/investigations/ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md](../investigations/ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md)** - Why files weren't created
+2. Understand: **[docs/development/reports/IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md](IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md)** - How callbacks work
+3. Reference: **[docs/development/reports/ACTION_PLAN_RESOLUTION.md](ACTION_PLAN_RESOLUTION.md)** - Phase-by-phase implementation
 4. Code: Review changes in **src/main.py**
 5. Test: Run with verbose logging
 
 ### For Project Managers (30 minutes)
-1. Start: **EXECUTIVE_SUMMARY.md** - Status overview
-2. Plan: **ACTION_PLAN_RESOLUTION.md** - Timeline and resources
+1. Start: **[docs/development/reports/EXECUTIVE_SUMMARY.md](EXECUTIVE_SUMMARY.md)** - Status overview
+2. Plan: **[docs/development/reports/ACTION_PLAN_RESOLUTION.md](ACTION_PLAN_RESOLUTION.md)** - Timeline and resources
 3. Metrics: Check success criteria section
 4. Decisions: Review recommendations
 
@@ -36,23 +36,23 @@ This index organizes all documentation related to the analysis of test run 20260
 
 | Document | Focus | Length | Audience |
 |----------|-------|--------|----------|
-| QUICK_REFERENCE.md | Visual summary | 3 KB | Everyone |
-| ANALYSIS_RUN_20260208_222827785.md | What happened | 2 KB | Technical |
-| ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md | Why it happened | 3 KB | Developers |
+| [docs/development/reports/QUICK_REFERENCE.md](QUICK_REFERENCE.md) | Visual summary | 3 KB | Everyone |
+| [docs/development/investigations/ANALYSIS_RUN_20260208_222827785.md](../investigations/ANALYSIS_RUN_20260208_222827785.md) | What happened | 2 KB | Technical |
+| [docs/development/investigations/ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md](../investigations/ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md) | Why it happened | 3 KB | Developers |
 
 ### Understanding the Solution
 
 | Document | Focus | Length | Audience |
 |----------|-------|--------|----------|
-| IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md | How it was fixed | 4 KB | Technical |
-| EXECUTIVE_SUMMARY.md | Impact summary | 3.5 KB | Managers |
-| ACTION_PLAN_RESOLUTION.md | How to fix root cause | 7 KB | Developers |
+| [docs/development/reports/IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md](IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md) | How it was fixed | 4 KB | Technical |
+| [docs/development/reports/EXECUTIVE_SUMMARY.md](EXECUTIVE_SUMMARY.md) | Impact summary | 3.5 KB | Managers |
+| [docs/development/reports/ACTION_PLAN_RESOLUTION.md](ACTION_PLAN_RESOLUTION.md) | How to fix root cause | 7 KB | Developers |
 
 ### Reference Materials
 
 | Document | Content | Length |
 |----------|---------|--------|
-| SUMMARY_COMPLETE.md | Master summary | 5 KB |
+| [docs/development/reports/SUMMARY_COMPLETE.md](SUMMARY_COMPLETE.md) | Master summary | 5 KB |
 | This file | Documentation index | 3 KB |
 | src/main.py | Code changes | ~100 lines |
 

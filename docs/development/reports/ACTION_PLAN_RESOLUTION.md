@@ -294,6 +294,6 @@ The issues are considered resolved when:
 
 ## References
 
-- [Analysis of Run 20260208_222827785](ANALYSIS_RUN_20260208_222827785.md)
-- [Root Cause Analysis](ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md)
+- [Analysis of Run 20260208_222827785](../investigations/ANALYSIS_RUN_20260208_222827785.md)
+- [Root Cause Analysis](../investigations/ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md)
 - [Improvements Implemented](IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md)

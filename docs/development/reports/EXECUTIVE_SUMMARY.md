@@ -77,7 +77,7 @@
 3. Are tools executing in the correct directory?
 4. Is there error suppression hiding the real problem?
 
-**Next step**: Review the investigation checklist in [ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md](ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md)
+**Next step**: Review the investigation checklist in [docs/development/investigations/ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md](../investigations/ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md)
 
 ## Recommendations
 
@@ -145,11 +145,11 @@ After all improvements:
 
 ## Files Created (Documentation)
 
-1. `ANALYSIS_RUN_20260208_222827785.md` - Detailed analysis
-2. `ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md` - Root cause investigation
-3. `IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md` - Detailed improvements
-4. `ACTION_PLAN_RESOLUTION.md` - Complete action plan
-5. `EXECUTIVE_SUMMARY.md` - This document
+1. [docs/development/investigations/ANALYSIS_RUN_20260208_222827785.md](../investigations/ANALYSIS_RUN_20260208_222827785.md) - Detailed analysis
+2. [docs/development/investigations/ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md](../investigations/ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md) - Root cause investigation
+3. [docs/development/reports/IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md](IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md) - Detailed improvements
+4. [docs/development/reports/ACTION_PLAN_RESOLUTION.md](ACTION_PLAN_RESOLUTION.md) - Complete action plan
+5. [docs/development/reports/EXECUTIVE_SUMMARY.md](EXECUTIVE_SUMMARY.md) - This document
 
 ## Questions & Answers
 
@@ -178,13 +178,13 @@ A: 3-4 weeks with proper investigation and testing.
 ## Document Index
 
 For more details, see:
-- Technical details: [IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md](IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md)
-- Root cause info: [ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md](ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md)
-- Full action plan: [ACTION_PLAN_RESOLUTION.md](ACTION_PLAN_RESOLUTION.md)
-- Analysis details: [ANALYSIS_RUN_20260208_222827785.md](ANALYSIS_RUN_20260208_222827785.md)
+- Technical details: [docs/development/reports/IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md](IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md)
+- Root cause info: [docs/development/investigations/ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md](../investigations/ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md)
+- Full action plan: [docs/development/reports/ACTION_PLAN_RESOLUTION.md](ACTION_PLAN_RESOLUTION.md)
+- Analysis details: [docs/development/investigations/ANALYSIS_RUN_20260208_222827785.md](../investigations/ANALYSIS_RUN_20260208_222827785.md)
 
 ---
 
 **Document prepared**: February 9, 2026  
 **Status**: Ready for discussion  
-**Action items**: See ACTION_PLAN_RESOLUTION.md
+**Action items**: See [docs/development/reports/ACTION_PLAN_RESOLUTION.md](ACTION_PLAN_RESOLUTION.md)

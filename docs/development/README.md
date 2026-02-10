@@ -32,6 +32,42 @@ Detailed history of modifications, improvements, and fixes.
 - **Contains**: Chronological record of all modifications with details
 - **Time**: Variable depending on scope of interest
 
+### Package Management Tools
+Comprehensive package management functionality for agents.
+- **Read if**: You need to understand how package search and installation is implemented
+- **Contains**: Search packages API, install packages API, security features, usage examples
+- **Time**: 10-15 minutes
+
+### Tool-Based Task Assignment
+Manager role task assignment system implementation.
+- **Read if**: You need to understand how the manager assigns tasks via tool calls
+- **Contains**: Manager tools, system prompt updates, tool call extraction, dual format support
+- **Time**: 10-15 minutes
+
+### Tool Injection Summary
+Dynamic tool injection and runtime tool availability.
+- **Read if**: You need to understand how tools become available to agents at runtime
+- **Contains**: Dynamic injection mechanism, tool description function, injection patterns
+- **Time**: 10-15 minutes
+
+### Investigations
+Root cause analyses and incident investigations.
+- **Read if**: You need to diagnose system failures or review incident findings
+- **Contains**: Event log analysis, root cause hypotheses, investigation steps
+- **Location**: [docs/development/investigations/](investigations/)
+
+### Reports
+Run-specific summaries and improvement reports.
+- **Read if**: You want a consolidated view of a specific run or change set
+- **Contains**: Executive summaries, action plans, improvement notes
+- **Location**: [docs/development/reports/](reports/)
+
+### Testing
+Component and integration test documentation.
+- **Read if**: You are validating changes or extending test coverage
+- **Contains**: Test suite guides, quick starts, execution references
+- **Location**: [docs/development/testing/](testing/)
+
 ---
 
 ## 🎯 Quick Start
@@ -43,6 +79,18 @@ Detailed history of modifications, improvements, and fixes.
 **About to commit changes?** Use: [`VERIFICATION_CHECKLIST.md`](VERIFICATION_CHECKLIST.md)
 
 **Understanding history?** Check: [`CHANGE_LOG.md`](CHANGE_LOG.md)
+
+**Understanding package management?** Read: [`PACKAGE_MANAGEMENT_TOOLS.md`](PACKAGE_MANAGEMENT_TOOLS.md)
+
+**Learning about task assignment?** Read: [`TOOL_BASED_TASK_ASSIGNMENT.md`](TOOL_BASED_TASK_ASSIGNMENT.md)
+
+**Exploring tool injection?** Read: [`TOOL_INJECTION_SUMMARY.md`](TOOL_INJECTION_SUMMARY.md)
+
+**Need investigation context?** Browse: [docs/development/investigations/](investigations/)
+
+**Looking for run summaries?** Browse: [docs/development/reports/](reports/)
+
+**Running tests?** Start here: [docs/development/testing/TESTS_QUICK_START.md](testing/TESTS_QUICK_START.md)
 
 ---
 

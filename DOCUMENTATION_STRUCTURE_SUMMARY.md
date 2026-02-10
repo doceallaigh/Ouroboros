@@ -19,6 +19,9 @@ docs/
 ├── human/          # For project managers & stakeholders
 ├── agents/         # For AI agents executing tasks
 ├── development/    # For developers building the system
+│   ├── investigations/  # Root cause analyses and incident investigations
+│   ├── reports/         # Run-specific summaries and improvement reports
+│   └── testing/         # Test suite documentation and guides
 └── reference/      # For technical specifications
 ```
 
@@ -38,12 +41,15 @@ docs/
 - TOOL_INJECTION_SUMMARY.md - How tools are injected
 - README.md - Category guide
 
-#### **docs/development/** (5 files)
+#### **docs/development/** (core files + subdirectories)
 - ARCHITECTURE.md - System design and components
 - REFACTORING_CHANGES.md - Recent refactoring details
 - VERIFICATION_CHECKLIST.md - Testing procedures
 - CHANGE_LOG.md - Complete modification history
 - README.md - Category guide
+- investigations/ - Root cause analyses and incident investigations
+- reports/ - Run-specific summaries and improvement reports
+- testing/ - Test suite documentation and guides
 
 #### **docs/reference/** (1 file)
 - README.md - Category guide with quick reference
@@ -127,7 +133,13 @@ docs/
 │   ├── ARCHITECTURE.md               (System design)
 │   ├── REFACTORING_CHANGES.md        (Recent work)
 │   ├── VERIFICATION_CHECKLIST.md     (QA procedures)
-│   └── CHANGE_LOG.md                 (Complete history)
+│   ├── CHANGE_LOG.md                 (Complete history)
+│   ├── PACKAGE_MANAGEMENT_TOOLS.md   (Package management)
+│   ├── TOOL_BASED_TASK_ASSIGNMENT.md (Task assignment system)
+│   ├── TOOL_INJECTION_SUMMARY.md     (Tool injection)
+│   ├── investigations/               (Root cause analyses)
+│   ├── reports/                      (Run-specific summaries)
+│   └── testing/                      (Test suite documentation)
 │
 └── reference/
     └── README.md                     (Category intro & specs)

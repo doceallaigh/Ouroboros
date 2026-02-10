@@ -28,37 +28,37 @@
 
 ### Analysis Documents Created
 
-1. **ANALYSIS_RUN_20260208_222827785.md** (1.2 KB)
+1. **[docs/development/investigations/ANALYSIS_RUN_20260208_222827785.md](../investigations/ANALYSIS_RUN_20260208_222827785.md)** (1.2 KB)
    - Event log analysis
    - Issue identification
    - Root cause summary
    - Recommendations
 
-2. **ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md** (3.1 KB)
+2. **[docs/development/investigations/ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md](../investigations/ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md)** (3.1 KB)
    - Deep dive into code generation failure
    - Three hypotheses for why files aren't created
    - Investigation steps needed
    - Debugging checklist
 
-3. **IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md** (3.8 KB)
+3. **[docs/development/reports/IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md](IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md)** (3.8 KB)
    - Before/after comparison
    - Technical details of changes
    - Expected behavior changes
    - Testing procedures
 
-4. **ACTION_PLAN_RESOLUTION.md** (7.2 KB)
+4. **[docs/development/reports/ACTION_PLAN_RESOLUTION.md](ACTION_PLAN_RESOLUTION.md)** (7.2 KB)
    - Prioritized action items (Phases 1-4)
    - Detailed implementation guidance
    - Success metrics
    - Timeline (4 weeks)
 
-5. **EXECUTIVE_SUMMARY.md** (3.5 KB)
+5. **[docs/development/reports/EXECUTIVE_SUMMARY.md](EXECUTIVE_SUMMARY.md)** (3.5 KB)
    - High-level overview
    - Key recommendations
    - Quick Q&A section
    - Metrics and impact
 
-6. **QUICK_REFERENCE.md** (3.0 KB)
+6. **[docs/development/reports/QUICK_REFERENCE.md](QUICK_REFERENCE.md)** (3.0 KB)
    - 30-second summary
    - Visual diagrams
    - Success criteria
@@ -177,12 +177,12 @@ When run with improvements:
 - `src/main.py` - Added ~100 lines for callback/verification features
 
 ### Documentation (New)
-- `ANALYSIS_RUN_20260208_222827785.md`
-- `ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md`
-- `IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md`
-- `ACTION_PLAN_RESOLUTION.md`
-- `EXECUTIVE_SUMMARY.md`
-- `QUICK_REFERENCE.md`
+- [docs/development/investigations/ANALYSIS_RUN_20260208_222827785.md](../investigations/ANALYSIS_RUN_20260208_222827785.md)
+- [docs/development/investigations/ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md](../investigations/ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md)
+- [docs/development/reports/IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md](IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md)
+- [docs/development/reports/ACTION_PLAN_RESOLUTION.md](ACTION_PLAN_RESOLUTION.md)
+- [docs/development/reports/EXECUTIVE_SUMMARY.md](EXECUTIVE_SUMMARY.md)
+- [docs/development/reports/QUICK_REFERENCE.md](QUICK_REFERENCE.md)
 
 ### Total Documentation
 - ~20 KB of analysis and guidance
@@ -276,11 +276,11 @@ The work is considered complete when:
 - Configuration: src/roles.json
 
 ### Documentation Created
-- `QUICK_REFERENCE.md` - Start here for overview
-- `EXECUTIVE_SUMMARY.md` - For managers/stakeholders
-- `IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md` - Technical details
-- `ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md` - Investigation guide
-- `ACTION_PLAN_RESOLUTION.md` - Implementation roadmap
+- [docs/development/reports/QUICK_REFERENCE.md](QUICK_REFERENCE.md) - Start here for overview
+- [docs/development/reports/EXECUTIVE_SUMMARY.md](EXECUTIVE_SUMMARY.md) - For managers/stakeholders
+- [docs/development/reports/IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md](IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md) - Technical details
+- [docs/development/investigations/ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md](../investigations/ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md) - Investigation guide
+- [docs/development/reports/ACTION_PLAN_RESOLUTION.md](ACTION_PLAN_RESOLUTION.md) - Implementation roadmap
 
 ## Recommendation
 

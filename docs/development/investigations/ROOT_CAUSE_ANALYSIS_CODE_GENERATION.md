@@ -165,5 +165,5 @@ Need to carefully review:
 ## Related Documentation
 
 - [Analysis of Run 20260208_222827785](ANALYSIS_RUN_20260208_222827785.md)
-- [Improvements: Callback and Verification](IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md)
+- [Improvements: Callback and Verification](../reports/IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md)
 - Code files: `src/agent_tools.py`, `src/main.py`, `src/filesystem.py`

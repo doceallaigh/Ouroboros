@@ -310,9 +310,9 @@ fi
 ## Test Documentation
 
 For detailed test documentation, see:
-- `TEST_SUITE_DOCUMENTATION.md` - Comprehensive guide
+- [docs/development/testing/TEST_SUITE_DOCUMENTATION.md](TEST_SUITE_DOCUMENTATION.md) - Comprehensive guide
 - Test files themselves - Inline comments
-- `IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md` - Feature details
+- [docs/development/reports/IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md](../reports/IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md) - Feature details
 
 ---
 

@@ -117,19 +117,19 @@ dir shared_repo/20260208_222827785/
 ## Important Files
 
 To understand the issues:
-1. Start: `EXECUTIVE_SUMMARY.md` (this level of detail)
-2. Deep dive: `ANALYSIS_RUN_20260208_222827785.md` (technical details)
-3. Root cause: `ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md` (investigation guidance)
-4. Action plan: `ACTION_PLAN_RESOLUTION.md` (what to do)
-5. Code changes: `IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md` (technical details)
+1. Start: [docs/development/reports/EXECUTIVE_SUMMARY.md](EXECUTIVE_SUMMARY.md) (this level of detail)
+2. Deep dive: [docs/development/investigations/ANALYSIS_RUN_20260208_222827785.md](../investigations/ANALYSIS_RUN_20260208_222827785.md) (technical details)
+3. Root cause: [docs/development/investigations/ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md](../investigations/ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md) (investigation guidance)
+4. Action plan: [docs/development/reports/ACTION_PLAN_RESOLUTION.md](ACTION_PLAN_RESOLUTION.md) (what to do)
+5. Code changes: [docs/development/reports/IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md](IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md) (technical details)
 
 ## Contact
 
 For questions about:
-- **General status**: See EXECUTIVE_SUMMARY.md
-- **Technical details**: See IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md
-- **Root causes**: See ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md
-- **Action plan**: See ACTION_PLAN_RESOLUTION.md
+- **General status**: See [docs/development/reports/EXECUTIVE_SUMMARY.md](EXECUTIVE_SUMMARY.md)
+- **Technical details**: See [docs/development/reports/IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md](IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md)
+- **Root causes**: See [docs/development/investigations/ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md](../investigations/ROOT_CAUSE_ANALYSIS_CODE_GENERATION.md)
+- **Action plan**: See [docs/development/reports/ACTION_PLAN_RESOLUTION.md](ACTION_PLAN_RESOLUTION.md)
 
 ---
 

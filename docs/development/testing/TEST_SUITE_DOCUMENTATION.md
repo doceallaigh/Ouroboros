@@ -439,7 +439,7 @@ Tests pass when:
 - Test files: `src/test_callback*.py`
 - Test runner: `src/run_callback_tests.py`
 - Main code: `src/main.py`
-- Related docs: `IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md`
+- Related docs: [docs/development/reports/IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md](../reports/IMPROVEMENTS_CALLBACK_AND_VERIFICATION.md)
 
 ---
 
