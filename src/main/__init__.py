@@ -27,9 +27,9 @@ from comms.response_processing import LLMPostProcessor
 from fileio import FileSystem, FileSystemError, ReadOnlyFileSystem
 from tools import AgentTools, ToolError, get_tools_description
 
-from main.exceptions import OrganizationError
-from main.coordinator import CentralCoordinator
-from main.agent import Agent
+from .exceptions import OrganizationError
+from .coordinator import CentralCoordinator
+from .agent import Agent
 
 # Configure logging
 logging.basicConfig(
@@ -227,3 +227,5 @@ For more information, see documentation in docs/
 
 if __name__ == "__main__":
     main()
+
+__all__ = ["main", "CentralCoordinator", "Agent", "OrganizationError"]

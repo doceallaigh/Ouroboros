@@ -4,7 +4,7 @@ Test command-line interface argument parsing.
 
 import sys
 import unittest
-from unittest.mock import patch, Mock
+from unittest.mock import patch
 from io import StringIO
 
 
