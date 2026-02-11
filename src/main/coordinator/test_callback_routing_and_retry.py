@@ -20,7 +20,7 @@ import sys
 sys.path.insert(0, 'src')
 
 from main import CentralCoordinator, Agent, OrganizationError
-from filesystem import FileSystem
+from fileio import FileSystem
 
 
 class CallbackTrackingFileSystem:
@@ -123,7 +123,7 @@ class TestDeveloperCompletionWithoutCode:
             replay_mode=False
         )
         
-        with patch.object(coordinator, '_create_agent_for_role') as mock_create:
+        with patch.object(coordinator, 'create_agent_for_role') as mock_create:
             # Developer that doesn't create files
             mock_developer = Mock()
             mock_developer.name = "developer01"
@@ -140,7 +140,7 @@ class TestDeveloperCompletionWithoutCode:
             assert len(tracking_filesystem.list_files_in_workspace()) == 0
             
             # Execute developer task
-            result = coordinator._execute_single_assignment(
+            result = coordinator.execute_single_assignment(
                 role="developer",
                 task="Create requirements.txt",
                 original_request="Build ML project"
@@ -163,7 +163,7 @@ class TestDeveloperCompletionWithoutCode:
             replay_mode=False
         )
         
-        with patch.object(coordinator, '_create_agent_for_role') as mock_create:
+        with patch.object(coordinator, 'create_agent_for_role') as mock_create:
             # Auditor that detects missing files
             mock_auditor = Mock()
             mock_auditor.name = "auditor01"
@@ -179,7 +179,7 @@ class TestDeveloperCompletionWithoutCode:
             mock_create.return_value = mock_auditor
             
             # Execute auditor task (as if developer failed)
-            result = coordinator._execute_single_assignment(
+            result = coordinator.execute_single_assignment(
                 role="auditor",
                 task={
                     "description": "Verify requirements.txt was created",
@@ -211,7 +211,7 @@ class TestDeveloperCompletionWithoutCode:
             replay_mode=False
         )
         
-        with patch.object(coordinator, '_create_agent_for_role') as mock_create:
+        with patch.object(coordinator, 'create_agent_for_role') as mock_create:
             mock_auditor = Mock()
             mock_auditor.name = "auditor01"
             mock_auditor.callback_handler = None
@@ -223,7 +223,7 @@ class TestDeveloperCompletionWithoutCode:
             
             mock_create.return_value = mock_auditor
             
-            coordinator._execute_single_assignment(
+            coordinator.execute_single_assignment(
                 role="auditor",
                 task={"description": "Audit", "caller": "manager"},
                 original_request="Test"
@@ -263,7 +263,7 @@ class TestCallbackRouting:
         })
         
         # Get blockers
-        blockers = coordinator._get_blocker_callbacks()
+        blockers = coordinator.get_blocker_callbacks()
         
         assert len(blockers) == 1
         assert "data_preprocessing.py" in blockers[0]["message"]
@@ -296,7 +296,7 @@ class TestCallbackRouting:
             }
         ])
         
-        blockers = coordinator._get_blocker_callbacks()
+        blockers = coordinator.get_blocker_callbacks()
         
         assert len(blockers) == 3
         assert all(b["type"] == "blocker" for b in blockers)
@@ -323,7 +323,7 @@ class TestCallbackToAgentExecution:
         })
         
         # Extract blockers
-        blockers = coordinator._get_blocker_callbacks()
+        blockers = coordinator.get_blocker_callbacks()
         
         # Verify we can identify this is a missing file issue
         assert len(blockers) > 0
@@ -367,7 +367,7 @@ class TestFilePersistenceValidation:
             replay_mode=False
         )
         
-        with patch.object(coordinator, '_create_agent_for_role') as mock_create:
+        with patch.object(coordinator, 'create_agent_for_role') as mock_create:
             # Developer that creates files via tools
             mock_developer = Mock()
             mock_developer.name = "developer01"
@@ -395,7 +395,7 @@ class TestFilePersistenceValidation:
             mock_create.return_value = mock_developer
             
             # Execute task
-            result = coordinator._execute_single_assignment(
+            result = coordinator.execute_single_assignment(
                 role="developer",
                 task="Create requirements.txt",
                 original_request="Setup"
@@ -441,7 +441,7 @@ class TestCompleteWorkflow:
             replay_mode=False
         )
         
-        with patch.object(coordinator, '_create_agent_for_role') as mock_create:
+        with patch.object(coordinator, 'create_agent_for_role') as mock_create:
             # Step 1: Developer completes without creating files
             mock_developer = Mock()
             mock_developer.name = "developer01"
@@ -454,7 +454,7 @@ class TestCompleteWorkflow:
             
             mock_create.return_value = mock_developer
             
-            dev_result = coordinator._execute_single_assignment(
+            dev_result = coordinator.execute_single_assignment(
                 role="developer",
                 task="Create requirements.txt",
                 original_request="Build ML project"
@@ -477,7 +477,7 @@ class TestCompleteWorkflow:
             
             mock_create.return_value = mock_auditor
             
-            audit_result = coordinator._execute_single_assignment(
+            audit_result = coordinator.execute_single_assignment(
                 role="auditor",
                 task={
                     "description": "Verify requirements.txt created",
@@ -535,7 +535,7 @@ class TestCompleteWorkflow:
             }
         ])
         
-        blockers = coordinator._get_blocker_callbacks()
+        blockers = coordinator.get_blocker_callbacks()
         queries = [c for c in coordinator.callbacks if c["type"] == "query"]
         
         assert len(blockers) == 3
@@ -562,7 +562,7 @@ class TestCompleteWorkflow:
         ])
         
         # Create final verification task
-        task = coordinator._create_final_verification_task("Test request", [])
+        task = coordinator.create_final_verification_task("Test request", [])
         
         # Task should be comprehensive
         assert "VERIFICATION CHECKLIST" in task["task"]

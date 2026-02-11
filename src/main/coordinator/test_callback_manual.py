@@ -17,7 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from main import CentralCoordinator
-from filesystem import FileSystem
+from fileio import FileSystem
 
 
 def test_callback_mechanism():
@@ -47,7 +47,7 @@ def test_callback_mechanism():
     
     # Execute the task (this should set callback_handler)
     try:
-        result = coordinator._execute_single_assignment(
+        result = coordinator.execute_single_assignment(
             role="developer",
             task=test_task,
             original_request="Test callback mechanism"

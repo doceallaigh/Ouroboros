@@ -33,6 +33,7 @@ from comms.channel import (
     
     # Utilities
     extract_content_from_response,
+    extract_full_response,
     sanitize_output,
     sanitize_input,
 )
@@ -75,6 +76,7 @@ __all__ = [
     
     # Utilities
     "extract_content_from_response",
+    "extract_full_response",
     "sanitize_output",
     "sanitize_input",
     

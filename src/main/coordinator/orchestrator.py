@@ -82,3 +82,65 @@ def execute_all_assignments(coordinator, assignments: List[Dict[str, Any]], user
     
     logger.info(f"All assignments completed ({len(results)} total results)")
     return results
+
+
+def assign_and_execute(coordinator, user_request: str) -> List[Dict[str, Any]]:
+    """
+    High-level orchestration: decompose request, execute assignments, verify result.
+    
+    Orchestrates the complete workflow:
+    1. Decompose user request into atomic assignments
+    2. Validate that assigned roles exist
+    3. Execute all assignments respecting sequence ordering
+    4. Create and execute final verification task
+    5. Return aggregated results
+    
+    Args:
+        coordinator: CentralCoordinator instance
+        user_request: User's high-level request
+        
+    Returns:
+        List of execution results including final verification
+        
+    Raises:
+        OrganizationError: If decomposition, execution, or verification fails
+    """
+    logger.info(f"Starting assign_and_execute for request: {user_request[:100]}")
+    
+    # Step 1: Decompose request
+    decomposition_json = coordinator.decompose_request(user_request)
+    
+    # Step 2: Parse assignments
+    try:
+        assignments = json.loads(decomposition_json)
+        if not isinstance(assignments, list):
+            assignments = []
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse decomposition JSON: {e}")
+        raise OrganizationError(f"Invalid decomposition format: {e}")
+    
+    logger.info(f"Decomposed into {len(assignments)} assignments")
+    
+    # Step 3: Validate roles
+    coordinator.validate_assignment_roles(assignments)
+    
+    # Step 4: Execute assignments
+    results = coordinator.execute_all_assignments(assignments, user_request)
+    
+    # Step 5: Create and execute final verification task
+    verification_task = coordinator.create_final_verification_task(user_request, results)
+    if verification_task:
+        verification_result = coordinator.execute_single_assignment(
+            role=verification_task.get("role"),
+            task={
+                "description": verification_task.get("task"),
+                "task": verification_task.get("task")
+            },
+            original_request=user_request
+        )
+        results.append(verification_result)
+        logger.info("Final verification completed")
+    
+    logger.info(f"assign_and_execute complete with {len(results)} results")
+    return results
+

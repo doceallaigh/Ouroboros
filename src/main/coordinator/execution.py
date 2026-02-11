@@ -10,6 +10,7 @@ from typing import Dict, Any, Optional
 
 from main.exceptions import OrganizationError
 from main.agent import Agent
+from main.agent.agentic_loop import execute_with_agentic_loop
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,8 @@ def execute_single_assignment(
 ) -> Dict[str, Any]:
     """
     Execute a single task assignment by finding/creating an agent and running the task.
+    
+    Uses the agentic loop to execute tools and iterate until task completion.
     
     Args:
         coordinator: CentralCoordinator instance
@@ -62,15 +65,41 @@ def execute_single_assignment(
                     "source": "replay"
                 }
         
-        # Execute task
-        logger.info(f"Agent {agent.name} executing task (role: {role})")
-        response = agent.execute_task(agent_task)
+        # Get working directory for tool execution
+        working_dir = coordinator.filesystem.src_dir
         
-        # Record result
+        # Execute task using agentic loop (with tool execution)
+        logger.info(f"Agent {agent.name} executing task with agentic loop (role: {role})")
+        loop_result = execute_with_agentic_loop(
+            agent=agent,
+            task=agent_task,
+            working_dir=working_dir,
+            max_iterations=15
+        )
+        
+        # Record execution event
+        coordinator.filesystem.record_event(
+            coordinator.filesystem.EVENT_TASK_COMPLETED,
+            {
+                "role": role,
+                "agent": agent.name,
+                "iteration_count": loop_result.get("iteration_count", 0),
+                "task_complete": loop_result.get("task_complete", False),
+                "tools_executed": any(
+                    tr.get("tools_executed", False) 
+                    for tr in loop_result.get("tool_results", [])
+                )
+            }
+        )
+        
+        # Build result
         result = {
             "role": role,
             "agent": agent.name,
-            "response": response,
+            "response": loop_result.get("final_response", ""),
+            "tool_results": loop_result.get("tool_results", []),
+            "iteration_count": loop_result.get("iteration_count", 0),
+            "task_complete": loop_result.get("task_complete", False),
             "source": "execution"
         }
         

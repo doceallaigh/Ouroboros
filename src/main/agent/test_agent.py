@@ -87,7 +87,7 @@ class TestAgent(MockedNetworkTestCase):
         }
         
         with patch('main.agent.executor.asyncio.run', return_value=mock_response):
-            with patch('main.extract_content_from_response', return_value="Task completed"):
+            with patch('main.agent.executor.extract_content_from_response', return_value="Task completed"):
                 agent = Agent(self.config, self.mock_channel_factory, self.mock_filesystem, instance_number=1)
                 
                 task = {"user_prompt": "Do something"}
@@ -101,7 +101,7 @@ class TestAgent(MockedNetworkTestCase):
         mock_response = Mock()
         
         with patch('main.agent.executor.asyncio.run', return_value=mock_response):
-            with patch('main.extract_content_from_response', return_value="Output"):
+            with patch('main.agent.executor.extract_content_from_response', return_value="Output"):
                 agent = Agent(self.config, self.mock_channel_factory, self.mock_filesystem, instance_number=1)
                 
                 task = {"user_prompt": "Do something"}
@@ -118,7 +118,7 @@ class TestAgent(MockedNetworkTestCase):
         mock_response = Mock()
         
         with patch('main.agent.executor.asyncio.run', return_value=mock_response):
-            with patch('main.extract_content_from_response', return_value="Output"):
+            with patch('main.agent.executor.extract_content_from_response', return_value="Output"):
                 agent = Agent(self.config, self.mock_channel_factory, self.mock_filesystem, instance_number=1)
                 
                 task = {"user_prompt": "Do something"}
@@ -137,7 +137,7 @@ class TestAgent(MockedNetworkTestCase):
         with patch('main.agent.executor.asyncio.run', side_effect=[
             Exception("timed out")
         ]):
-            with patch('main.extract_content_from_response', return_value="Output"):
+            with patch('main.agent.executor.extract_content_from_response', return_value="Output"):
                 with patch('main.agent.executor.time.sleep'):  # Speed up test
                     agent = Agent(self.config, self.mock_channel_factory, self.mock_filesystem, instance_number=1)
                     
@@ -165,7 +165,7 @@ class TestAgent(MockedNetworkTestCase):
         mock_response.status_code = 200
         
         with patch('main.agent.executor.asyncio.run', return_value=mock_response):
-            with patch('main.extract_content_from_response', return_value="Output"):
+            with patch('main.agent.executor.extract_content_from_response', return_value="Output"):
                 agent = Agent(self.config, self.mock_channel_factory, self.mock_filesystem)
                 
                 task = {"user_prompt": "Test prompt"}
@@ -210,7 +210,7 @@ clone_repo('https://example.com/repo.git')
             setattr(mock_tools, name, Mock())
         mock_tools.clone_repo = Mock(return_value={"success": True})
 
-        with patch("tools.AgentTools", return_value=mock_tools):
+        with patch("main.agent.tool_runner.AgentTools", return_value=mock_tools):
             agent.execute_tools_from_response(response, working_dir=".")
 
         mock_tools.clone_repo.assert_called_once_with(
@@ -250,7 +250,7 @@ clone_repo('https://example.com/repo.git', branch='dev')
             setattr(mock_tools, name, Mock())
         mock_tools.clone_repo = Mock(return_value={"success": True})
 
-        with patch("tools.AgentTools", return_value=mock_tools):
+        with patch("main.agent.tool_runner.AgentTools", return_value=mock_tools):
             agent.execute_tools_from_response(response, working_dir=".")
 
         mock_tools.clone_repo.assert_called_once_with(

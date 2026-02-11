@@ -263,6 +263,41 @@ def extract_content_from_response(
     return default_sanitizer.process(result)
 
 
+def extract_full_response(response: HTTPXResponse) -> dict:
+    """
+    Extract the full message from API response including tool_calls.
+    
+    This function extracts not just the content, but the entire message object
+    which may contain tool_calls when structured tool calling is used.
+    
+    Args:
+        response: HTTPXResponse object from API
+        
+    Returns:
+        Dict containing message data with 'content' and optionally 'tool_calls'
+        
+    Raises:
+        APIError: If response format is invalid
+    """
+    if response.status_code != 200:
+        raise APIError(f"API returned status {response.status_code}")
+    
+    try:
+        # Extract the full message object from OpenAI-style response
+        message = response.json()["choices"][0]["message"]
+        return message
+    except (KeyError, IndexError, TypeError, ValueError):
+        # Fallback: try to get content or raw response
+        try:
+            content = response.json()["choices"][0]["message"]["content"]
+            return {"content": content}
+        except Exception:
+            try:
+                return {"content": response.text}
+            except Exception:
+                return {"content": response.content.decode(errors="replace")}
+
+
 class Channel(ABC):
     """Abstract base class for communication channels."""
     

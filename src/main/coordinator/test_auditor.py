@@ -111,7 +111,7 @@ class TestAuditorRole(unittest.TestCase):
             coordinator = CentralCoordinator("/tmp/roles.json", mock_filesystem)
             
             # Verify auditor can be found
-            auditor_config = coordinator._find_agent_config("auditor")
+            auditor_config = coordinator.find_agent_config("auditor")
             self.assertIsNotNone(auditor_config)
             self.assertEqual(auditor_config["role"], "auditor")
     

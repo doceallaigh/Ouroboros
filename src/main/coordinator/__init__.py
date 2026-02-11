@@ -15,7 +15,7 @@ from main.agent.agent_factory import (
     find_agent_config,
     create_agent_for_role,
 )
-from main.coordinator.orchestrator import execute_all_assignments
+from main.coordinator.orchestrator import execute_all_assignments, assign_and_execute
 from main.coordinator.execution import execute_single_assignment
 from main.coordinator.verification import create_final_verification_task
 from main.coordinator.callbacks import (
@@ -56,11 +56,18 @@ def inject_coordinator_methods():
     # Orchestrator method
     CentralCoordinator.execute_all_assignments = execute_all_assignments
     
+    # High-level orchestration method
+    CentralCoordinator.assign_and_execute = assign_and_execute
+    
     # Execution method
     CentralCoordinator.execute_single_assignment = execute_single_assignment
     
     # Verification method
     CentralCoordinator.create_final_verification_task = create_final_verification_task
+    
+    # Callback methods
+    CentralCoordinator.get_blocker_callbacks = get_blocker_callbacks
+    CentralCoordinator.clear_blocker_callbacks = clear_blocker_callbacks
 
 
 # Inject methods on module import
@@ -73,6 +80,7 @@ __all__ = [
     "find_agent_config",
     "create_agent_for_role",
     "execute_all_assignments",
+    "assign_and_execute",
     "execute_single_assignment",
     "create_final_verification_task",
     "get_blocker_callbacks",

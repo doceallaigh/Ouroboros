@@ -10,10 +10,46 @@ import re
 import time
 from typing import Dict, List, Any, Optional
 
-from main.agent.agent_factory import create_agent_for_role
 from main.exceptions import OrganizationError
 
 logger = logging.getLogger(__name__)
+
+
+def extract_quoted_string(text: str, start_pos: int) -> tuple[Optional[str], int]:
+    """
+    Extract a quoted string from text, handling embedded quotes.
+    
+    Args:
+        text: Text to extract from
+        start_pos: Position of opening quote
+        
+    Returns:
+        Tuple of (extracted_string, position_after_closing_quote) or (None, start_pos) if invalid
+    """
+    if start_pos >= len(text):
+        return None, start_pos
+    
+    quote_char = text[start_pos]
+    if quote_char not in ('"', "'"):
+        return None, start_pos
+    
+    i = start_pos + 1
+    result = []
+    
+    while i < len(text):
+        if text[i] == '\\' and i + 1 < len(text):
+            # Handle escaped characters
+            i += 1
+            result.append(text[i])
+        elif text[i] == quote_char:
+            # Found closing quote
+            return ''.join(result), i + 1
+        else:
+            result.append(text[i])
+        i += 1
+    
+    # No closing quote found
+    return None, start_pos
 
 
 def extract_assignments_from_tool_calls(response: str) -> Optional[List[Dict[str, Any]]]:
@@ -30,36 +66,100 @@ def extract_assignments_from_tool_calls(response: str) -> Optional[List[Dict[str
     """
     assignments = []
     
-    # Look for assign_task calls: assign_task('role', 'task', sequence=N)
-    assign_task_pattern = r"assign_task\s*\(\s*['\"]([^'\"]+)['\"]\s*,\s*['\"]([^'\"]*?)['\"]\s*,\s*sequence\s*=\s*(\d+)"
-    for match in re.finditer(assign_task_pattern, response, re.DOTALL):
-        role, task, sequence = match.groups()
-        task = task.replace('\\n', '\n')  # Unescape newlines
-        assignments.append({
-            "role": role.strip(),
-            "task": task.strip(),
-            "sequence": int(sequence),
-            "caller": "manager"
-        })
+    # Preprocess: Replace newlines with spaces to handle line-wrapped responses
+    # This handles cases where text wrapping splits function calls across lines
+    response = response.replace('\n', ' ')
     
-    # Look for assign_tasks calls with array/list structure
-    # This is more complex - look for assign_tasks([ ... ])
-    assign_tasks_pattern = r"assign_tasks\s*\(\s*\[\s*(.*?)\s*\]\s*\)"
-    for match in re.finditer(assign_tasks_pattern, response, re.DOTALL):
-        tasks_str = match.group(1)
+    # Look for assign_task( calls
+    assign_task_pattern = r"assign_task\s*\("
+    for match in re.finditer(assign_task_pattern, response):
+        pos = match.end()
         
-        # Extract individual task objects from the array
-        # Look for {role: ..., task: ..., sequence: ...} patterns
-        task_obj_pattern = r"\{\s*['\"]?role['\"]?\s*:\s*['\"]([^'\"]+)['\"]\s*,\s*['\"]?task['\"]?\s*:\s*['\"]([^'\"]*?)['\"]\s*,\s*['\"]?sequence['\"]?\s*:\s*(\d+)"
-        for task_match in re.finditer(task_obj_pattern, tasks_str, re.DOTALL):
-            role, task, sequence = task_match.groups()
-            task = task.replace('\\n', '\n')  # Unescape newlines
+        # Skip whitespace and extract role (first quoted string)
+        while pos < len(response) and response[pos].isspace():
+            pos += 1
+        role, pos = extract_quoted_string(response, pos)
+        if role is None:
+            continue
+        
+        # Skip to comma and extract task (second quoted string)
+        comma_pos = response.find(',', pos)
+        if comma_pos == -1:
+            continue
+        
+        # Skip whitespace after comma
+        task_start = comma_pos + 1
+        while task_start < len(response) and response[task_start].isspace():
+            task_start += 1
+        
+        task, pos = extract_quoted_string(response, task_start)
+        if task is None:
+            continue
+        
+        # Skip to sequence parameter
+        # The response uses positional arguments: assign_task(role, task, sequence)
+        # NOT keyword arguments like sequence=0
+        # Look for comma followed by a number
+        seq_match = re.search(r',\s*(\d+)\s*\)', response[pos:])
+        if seq_match:
+            sequence = int(seq_match.group(1))
             assignments.append({
                 "role": role.strip(),
                 "task": task.strip(),
-                "sequence": int(sequence),
+                "sequence": sequence,
                 "caller": "manager"
             })
+    
+    # Look for assign_tasks calls with array/list structure
+    assign_tasks_pattern = r"assign_tasks\s*\(\s*\["
+    for match in re.finditer(assign_tasks_pattern, response):
+        pos = match.end()
+        
+        # Find the matching closing bracket
+        bracket_count = 1
+        end_pos = pos
+        while end_pos < len(response) and bracket_count > 0:
+            if response[end_pos] == '[':
+                bracket_count += 1
+            elif response[end_pos] == ']':
+                bracket_count -= 1
+            end_pos += 1
+        
+        if bracket_count != 0:
+            continue
+        
+        tasks_str = response[pos:end_pos - 1]
+        
+        # Extract individual task objects - look for patterns like {role: ..., task: ..., sequence: ...}
+        obj_pattern = r"\{\s*['\"]?role['\"]?\s*:\s*"
+        for obj_match in re.finditer(obj_pattern, tasks_str):
+            obj_pos = obj_match.end()
+            
+            # Extract role
+            role, obj_pos = extract_quoted_string(tasks_str, obj_pos)
+            if role is None:
+                continue
+            
+            # Find and extract task
+            task_match = re.search(r"['\"]?task['\"]?\s*:\s*", tasks_str[obj_pos:])
+            if not task_match:
+                continue
+            
+            task_pos = obj_pos + task_match.end()
+            task, task_pos = extract_quoted_string(tasks_str, task_pos)
+            if task is None:
+                continue
+            
+            # Find and extract sequence
+            seq_match = re.search(r"['\"]?sequence['\"]?\s*:\s*(\d+)", tasks_str[task_pos:])
+            if seq_match:
+                sequence = int(seq_match.group(1))
+                assignments.append({
+                    "role": role.strip(),
+                    "task": task.strip(),
+                    "sequence": sequence,
+                    "caller": "manager"
+                })
     
     return assignments if assignments else None
 
@@ -88,7 +188,7 @@ def decompose_request(coordinator, user_request: str) -> str:
     backoff_delay = 1.0
     
     # Create manager once outside the retry loop to avoid duplicate agents
-    manager = create_agent_for_role(coordinator, "manager")
+    manager = coordinator.create_agent_for_role("manager")
     
     for attempt in range(max_retries):
         try:

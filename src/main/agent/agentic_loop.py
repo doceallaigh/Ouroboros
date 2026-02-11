@@ -4,8 +4,13 @@ Agentic loop execution for agents.
 Allows agents to iteratively call tools and see results until task completion.
 """
 
+import json
 import logging
 from typing import Dict, Any, List
+
+from comms import APIError, extract_content_from_response, extract_full_response
+from main.agent.executor import run_async, _convert_tool_calls_to_text
+from main.agent.tool_definitions import get_tools_for_role
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +58,9 @@ def execute_with_agentic_loop(agent, task: Dict[str, Any], working_dir: str = ".
         logger.debug(f"Agent {agent.name} iteration {iteration_count}/{max_iterations}")
         
         # Execute task with current conversation history
-        response = _execute_with_conversation_history(agent, conversation_history)
+        response_bundle = _execute_with_conversation_history(agent, conversation_history)
+        response = response_bundle.get("response", "")
+        message = response_bundle.get("message")
         
         # Add assistant response to history
         conversation_history.append({
@@ -62,7 +69,12 @@ def execute_with_agentic_loop(agent, task: Dict[str, Any], working_dir: str = ".
         })
         
         # Execute tools from response
-        tool_results = execute_tools_from_response(agent, response, working_dir=working_dir)
+        tool_results = execute_tools_from_response(
+            agent,
+            response,
+            working_dir=working_dir,
+            message=message
+        )
         all_tool_results.append(tool_results)
         
         # Check if tools were executed
@@ -98,7 +110,7 @@ def execute_with_agentic_loop(agent, task: Dict[str, Any], working_dir: str = ".
     }
 
 
-def _execute_with_conversation_history(agent, conversation_history: List[Dict[str, str]]) -> str:
+def _execute_with_conversation_history(agent, conversation_history: List[Dict[str, str]]) -> Dict[str, Any]:
     """
     Execute agent with full conversation history (maintains context across iterations).
     
@@ -107,11 +119,10 @@ def _execute_with_conversation_history(agent, conversation_history: List[Dict[st
         conversation_history: List of message dicts with 'role' and 'content'
         
     Returns:
-        Agent's response as string
+        Dict with 'response' string and raw 'message' dict
     """
     import asyncio
     import time
-    from comms import APIError, extract_content_from_response
     from main.exceptions import OrganizationError
     
     base_timeout = agent.config.get("timeout", 120)
@@ -139,19 +150,58 @@ def _execute_with_conversation_history(agent, conversation_history: List[Dict[st
                 "temperature": float(agent.config.get("temperature", 0.7)),
                 "max_tokens": int(agent.config.get("max_tokens", -1)),
             }
+
+            # Add tool definitions if allowed
+            allowed_tools = agent.config.get("allowed_tools", [])
+            if allowed_tools:
+                tools = get_tools_for_role(allowed_tools)
+                if tools:
+                    payload["tools"] = tools
+                    payload["tool_choice"] = "auto"
             
             agent.channel.config["endpoint"] = selected_endpoint
             
             ticks = agent.channel.send_message(payload)
+
+            # Record query file for this iteration
+            query_ts = __import__("datetime").datetime.now().isoformat()
+            try:
+                agent.filesystem.create_query_file(agent.name, ticks, query_ts, payload)
+            except Exception:
+                logger.exception("Failed to create query file")
             
-            resp_result = asyncio.run(agent.channel.receive_message())
+            resp_result = run_async(agent.channel.receive_message())
             if isinstance(resp_result, tuple):
                 response, _ = resp_result
             else:
                 response = resp_result
             
-            result = extract_content_from_response(response, agent.post_processor)
-            return result
+            # Extract full response including tool_calls if present
+            message = extract_full_response(response)
+
+            if "tool_calls" in message and message["tool_calls"]:
+                result = _convert_tool_calls_to_text(message["tool_calls"], message.get("content", ""))
+            else:
+                if "content" in message:
+                    result = message["content"]
+                else:
+                    result = extract_content_from_response(response, agent.post_processor)
+
+            # Append raw and parsed response to the per-query file
+            resp_ts = __import__("datetime").datetime.now().isoformat()
+            try:
+                raw_response_str = json.dumps(message, indent=2) if isinstance(message, dict) else str(message)
+                agent.filesystem.append_response_file(
+                    agent.name, ticks, resp_ts,
+                    f"RAW_MESSAGE:\n{raw_response_str}\n\nPARSED_RESULT:\n{result}"
+                )
+            except Exception:
+                logger.exception("Failed to append response to query file")
+
+            return {
+                "response": result,
+                "message": message,
+            }
             
         except APIError as e:
             if "timed out" in str(e).lower() and attempt < agent.MAX_RETRIES - 1:

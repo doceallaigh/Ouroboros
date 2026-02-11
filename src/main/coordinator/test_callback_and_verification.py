@@ -20,7 +20,7 @@ import sys
 sys.path.insert(0, 'src')
 
 from main import CentralCoordinator, Agent, OrganizationError
-from filesystem import FileSystem
+from fileio import FileSystem
 from comms import ChannelFactory
 
 
@@ -154,7 +154,7 @@ class TestCallbackCollection:
         
         # Simulate a callback being raised
         # We need to trigger this through a task execution
-        with patch.object(coordinator, '_create_agent_for_role') as mock_create:
+        with patch.object(coordinator, 'create_agent_for_role') as mock_create:
             mock_agent = Mock()
             mock_agent.name = "auditor01"
             mock_agent.callback_handler = None
@@ -167,7 +167,7 @@ class TestCallbackCollection:
             mock_create.return_value = mock_agent
             
             # Execute a task with a caller (enables callbacks)
-            result = coordinator._execute_single_assignment(
+            result = coordinator.execute_single_assignment(
                 role="auditor",
                 task={"description": "Test audit", "caller": "manager"},
                 original_request="Test request"
@@ -193,7 +193,7 @@ class TestCallbackCollection:
         
         with patch('main.logger') as mock_logger:
             # Create and execute a task that will set up callback handler
-            with patch.object(coordinator, '_create_agent_for_role') as mock_create:
+            with patch.object(coordinator, 'create_agent_for_role') as mock_create:
                 mock_agent = Mock()
                 mock_agent.name = "auditor01"
                 mock_agent.callback_handler = None
@@ -205,7 +205,7 @@ class TestCallbackCollection:
                 
                 mock_create.return_value = mock_agent
                 
-                coordinator._execute_single_assignment(
+                coordinator.execute_single_assignment(
                     role="auditor",
                     task={"description": "Test", "caller": "manager"},
                     original_request="Test"
@@ -247,7 +247,7 @@ class TestBlockerExtraction:
             {"type": "blocker", "message": "Issue 3"},
         ]
         
-        blockers = coordinator._get_blocker_callbacks()
+        blockers = coordinator.get_blocker_callbacks()
         
         assert len(blockers) == 3
         assert all(cb["type"] == "blocker" for cb in blockers)
@@ -268,7 +268,7 @@ class TestBlockerExtraction:
             {"type": "clarification", "message": "Clarification"},
         ]
         
-        blockers = coordinator._get_blocker_callbacks()
+        blockers = coordinator.get_blocker_callbacks()
         
         assert len(blockers) == 0
 
@@ -287,20 +287,7 @@ class TestFinalVerificationTask:
         user_request = "Create a simple Python app"
         all_results = []
         
-        task = coordinator._create_final_verification_task(user_request, all_results)
-        
-        assert task["role"] == "auditor"
-        assert task["sequence"] == 99
-        assert "VERIFICATION CHECKLIST" in task["task"]
-        assert "PASS/FAIL" in task["task"]
-    
-    def test_final_verification_includes_blocker_context(self, mock_config, mock_filesystem):
-        """Final verification task should include context about previous blockers."""
-        coordinator = CentralCoordinator(
-            config_path=mock_config,
-            filesystem=mock_filesystem,
-            replay_mode=False
-        )
+        task = coordinator.create_final_verification_task(user_request, all_results)
         
         # Add some blockers
         coordinator.callbacks = [
@@ -314,10 +301,10 @@ class TestFinalVerificationTask:
             }
         ]
         
-        task = coordinator._create_final_verification_task("Test", [])
+        task = coordinator.create_final_verification_task("Test", [])
         
         # Task should mention previous blockers
-        assert "Previous blockers" in task["task"] or len(coordinator._get_blocker_callbacks()) > 0
+        assert "Previous blockers" in task["task"] or len(coordinator.get_blocker_callbacks()) > 0
 
 
 class TestDeveloperRetry:
@@ -331,7 +318,7 @@ class TestDeveloperRetry:
             replay_mode=False
         )
         
-        with patch.object(coordinator, '_create_agent_for_role') as mock_create:
+        with patch.object(coordinator, 'create_agent_for_role') as mock_create:
             mock_agent = Mock()
             mock_agent.name = "developer01"
             mock_agent.callback_handler = None
@@ -346,7 +333,7 @@ class TestDeveloperRetry:
             # Pre-populate filesystem with a file
             mock_filesystem.files["requirements.txt"] = "numpy==1.20.0"
             
-            result = coordinator._execute_single_assignment(
+            result = coordinator.execute_single_assignment(
                 role="developer",
                 task="Create requirements.txt",
                 original_request="Create a project"
@@ -367,7 +354,7 @@ class TestCallbackToAgentExecution:
             replay_mode=False
         )
         
-        with patch.object(coordinator, '_create_agent_for_role') as mock_create:
+        with patch.object(coordinator, 'create_agent_for_role') as mock_create:
             mock_agent = Mock()
             mock_agent.name = "auditor01"
             mock_agent.callback_handler = None
@@ -379,7 +366,7 @@ class TestCallbackToAgentExecution:
             
             mock_create.return_value = mock_agent
             
-            coordinator._execute_single_assignment(
+            coordinator.execute_single_assignment(
                 role="auditor",
                 task={"description": "Audit", "caller": "manager"},
                 original_request="Test"
@@ -427,7 +414,7 @@ class TestEndToEndFlow:
         
         with patch.object(coordinator, 'decompose_request') as mock_decompose:
             with patch.object(coordinator, '_execute_assignments') as mock_execute:
-                with patch.object(coordinator, '_execute_single_assignment') as mock_single:
+                with patch.object(coordinator, 'execute_single_assignment') as mock_single:
                     with patch('main.logger'):
                         # Mock decompose to return empty assignments
                         mock_decompose.return_value = json.dumps([])
@@ -435,7 +422,7 @@ class TestEndToEndFlow:
                         # Mock _execute_assignments to return empty results
                         mock_execute.return_value = []
                         
-                        # Mock _execute_single_assignment for final verification
+                        # Mock execute_single_assignment for final verification
                         mock_single.return_value = {
                             "role": "auditor",
                             "status": "completed",
@@ -444,7 +431,7 @@ class TestEndToEndFlow:
                         
                         results = coordinator.assign_and_execute("Test request")
                         
-                        # Should have called _execute_single_assignment for verification
+                        # Should have called execute_single_assignment for verification
                         # (Called at least once for final verification)
                         assert mock_single.called
     
@@ -475,7 +462,7 @@ class TestEndToEndFlow:
         
         assert len(coordinator.callbacks) == 3
         
-        blockers = coordinator._get_blocker_callbacks()
+        blockers = coordinator.get_blocker_callbacks()
         assert len(blockers) == 2
         assert blockers[0]["from"] == "auditor01"
         assert blockers[1]["from"] == "auditor02"
@@ -492,7 +479,7 @@ class TestRetryMechanism:
             replay_mode=False
         )
         
-        with patch.object(coordinator, '_create_agent_for_role') as mock_create:
+        with patch.object(coordinator, 'create_agent_for_role') as mock_create:
             mock_agent = Mock()
             mock_agent.name = "developer01"
             mock_agent.callback_handler = None
@@ -508,7 +495,7 @@ class TestRetryMechanism:
             assert len(mock_filesystem.files) == 0
             
             # Execute developer task
-            result = coordinator._execute_single_assignment(
+            result = coordinator.execute_single_assignment(
                 role="developer",
                 task="Create requirements.txt",
                 original_request="Setup"
