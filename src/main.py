@@ -790,7 +790,7 @@ class CentralCoordinator:
         Returns:
             True if .git directory exists, False otherwise
         """
-        work_dir = self.filesystem.get_work_directory()
+        work_dir = self.filesystem.working_dir
         if not isinstance(work_dir, (str, bytes, os.PathLike)):
             return False
         git_dir = os.path.join(work_dir, ".git")
@@ -807,7 +807,7 @@ class CentralCoordinator:
                 return None
         
             try:
-                work_dir = self.filesystem.get_work_directory()
+                work_dir = self.filesystem.working_dir
                 result = subprocess.run(
                     ["git", "rev-parse", "--abbrev-ref", "HEAD"],
                     capture_output=True,
@@ -852,7 +852,7 @@ class CentralCoordinator:
             logger.info("=" * 80)
             logger.info(f"Current branch: {branch_name}")
         
-            work_dir = self.filesystem.get_work_directory()
+            work_dir = self.filesystem.working_dir
             tools = AgentTools(working_dir=work_dir)
         
             # Step 1: Push the branch

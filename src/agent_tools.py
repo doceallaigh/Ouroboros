@@ -22,10 +22,8 @@ import subprocess
 import json
 import sys
 import re
-import re
 from typing import List, Dict, Any, Optional
 from pathlib import Path
-from code_runner import CodeRunner, CodeRunError
 
 logger = logging.getLogger(__name__)
 
@@ -56,11 +54,6 @@ class PackageError(ToolError):
     pass
 
 
-class GitError(ToolError):
-    """Raised when git operations fail."""
-    pass
-
-
 class AgentTools:
     """
     Provides agents with safe file system tools.
@@ -82,12 +75,6 @@ class AgentTools:
         "install_package",
         "check_package_installed",
         "list_installed_packages",
-        "clone_repo",
-        "checkout_branch",
-        "push_branch",
-        "create_pull_request",
-        "run_python",
-        "run_tests",
         "confirm_task_complete",
         "audit_files",
     }
@@ -100,7 +87,6 @@ class AgentTools:
             working_dir: Root directory for all operations (default: current directory)
             max_file_size: Maximum file size in bytes for read operations
             allowed_tools: Optional list of tool names allowed for the role
-            allowed_tools: Optional list of tool names allowed for the role
             
         Raises:
             ToolError: If working directory doesn't exist
@@ -111,18 +97,7 @@ class AgentTools:
         self.working_dir = os.path.abspath(working_dir)
         self.max_file_size = max_file_size
         self.allowed_tools = set(allowed_tools) if allowed_tools is not None else None
-        self.code_runner = CodeRunner()
         logger.info(f"Initialized AgentTools with working_dir: {self.working_dir}")
-
-    def __getattribute__(self, name: str):
-        tool_methods = object.__getattribute__(self, "TOOL_METHODS")
-        if name in tool_methods:
-            allowed_tools = object.__getattribute__(self, "allowed_tools")
-            if allowed_tools is not None and name not in allowed_tools:
-                def _blocked(*_args, **_kwargs):
-                    raise ToolError(f"Tool not allowed for this role: {name}")
-                return _blocked
-        return object.__getattribute__(self, name)
 
     def __getattribute__(self, name: str):
         tool_methods = object.__getattribute__(self, "TOOL_METHODS")
@@ -350,24 +325,19 @@ class AgentTools:
             raise ToolError(f"Failed to append to file {path}: {e}")
     
     def edit_file(self, path: str, diff: str, encoding: str = "utf-8") -> Dict[str, Any]:
-    def edit_file(self, path: str, diff: str, encoding: str = "utf-8") -> Dict[str, Any]:
         """
-        Edit file by applying a unified diff.
         Edit file by applying a unified diff.
         
         Args:
             path: File path (relative to working_dir)
             diff: Unified diff string (single-file) to apply
-            diff: Unified diff string (single-file) to apply
             encoding: Text encoding (default: utf-8)
             
         Returns:
             Dictionary with path, hunks applied, and result
-            Dictionary with path, hunks applied, and result
             
         Raises:
             PathError: If path is invalid
-            ToolError: If patch fails or does not match file contents
             ToolError: If patch fails or does not match file contents
         """
         try:
@@ -379,43 +349,29 @@ class AgentTools:
             # Read file
             with open(file_path, 'r', encoding=encoding) as f:
                 original_lines = f.read().splitlines(keepends=True)
-                original_lines = f.read().splitlines(keepends=True)
             
             new_lines, stats = self._apply_unified_diff(original_lines, diff)
-            new_lines, stats = self._apply_unified_diff(original_lines, diff)
             
-            if not stats["hunks"]:
             if not stats["hunks"]:
                 return {
                     "path": path,
                     "hunks": 0,
                     "added": 0,
                     "removed": 0,
-                    "hunks": 0,
-                    "added": 0,
-                    "removed": 0,
                     "success": False,
-                    "message": "No hunks applied",
                     "message": "No hunks applied",
                 }
             
             # Write back
             with open(file_path, 'w', encoding=encoding) as f:
                 f.write("".join(new_lines))
-                f.write("".join(new_lines))
             
-            logger.info(
-                f"Edited file: {path} (hunks={stats['hunks']}, added={stats['added']}, removed={stats['removed']})"
-            )
             logger.info(
                 f"Edited file: {path} (hunks={stats['hunks']}, added={stats['added']}, removed={stats['removed']})"
             )
             
             return {
                 "path": path,
-                "hunks": stats["hunks"],
-                "added": stats["added"],
-                "removed": stats["removed"],
                 "hunks": stats["hunks"],
                 "added": stats["added"],
                 "removed": stats["removed"],
@@ -426,12 +382,10 @@ class AgentTools:
             raise
         except ToolError:
             raise
-        except ToolError:
-            raise
         except Exception as e:
             raise ToolError(f"Failed to edit file {path}: {e}")
 
-    def _apply_unified_diff(self, original_lines: List[str], diff: str) -> tuple[List[str], Dict[str, int]]:
+    def _apply_unified_diff(self, original_lines: List[str], diff: str) -> (List[str], Dict[str, int]):
         """
         Apply a unified diff to a list of lines.
         
@@ -600,8 +554,7 @@ class AgentTools:
             
             # Add file-specific info
             if os.path.isfile(full_path):
-                with open(full_path, 'r', encoding='utf-8', errors='ignore') as handle:
-                    info["lines"] = sum(1 for _ in handle)
+                info["lines"] = sum(1 for _ in open(full_path, 'r', encoding='utf-8', errors='ignore'))
             
             # Add directory-specific info
             if os.path.isdir(full_path):
@@ -1051,462 +1004,6 @@ class AgentTools:
                 "packages": [],
                 "error": str(e),
             }
-
-    def clone_repo(self, repo_url: str, dest_dir: Optional[str] = None, branch: Optional[str] = None,
-                   depth: Optional[int] = None) -> Dict[str, Any]:
-        """
-        Clone a git repository into the working directory.
-
-        Args:
-            repo_url: Git repository URL or local path
-            dest_dir: Destination directory (relative to working_dir). If omitted, derive from repo_url.
-            branch: Optional branch name to clone
-            depth: Optional shallow clone depth (e.g., 1)
-
-        Returns:
-            Dictionary with clone status and paths
-
-        Raises:
-            ToolError: If inputs are invalid or clone fails
-            PathError: If destination escapes working directory
-        """
-        try:
-            if not repo_url or not isinstance(repo_url, str):
-                raise ToolError("Repository URL must be a non-empty string")
-
-            target_dir = dest_dir or self._derive_repo_dir_name(repo_url)
-            if not target_dir:
-                raise ToolError("Destination directory is required when it cannot be derived from repo URL")
-
-            target_path = self._validate_path(target_dir)
-            parent_dir = os.path.dirname(target_path)
-            os.makedirs(parent_dir, exist_ok=True)
-
-            if os.path.exists(target_path) and os.listdir(target_path):
-                raise ToolError(f"Destination directory is not empty: {target_dir}")
-
-            cmd = ["git", "clone"]
-            if depth is not None:
-                if not isinstance(depth, int) or depth <= 0:
-                    raise ToolError("Depth must be a positive integer when provided")
-                cmd.extend(["--depth", str(depth)])
-            if branch:
-                cmd.extend(["--branch", branch, "--single-branch"])
-            cmd.extend([repo_url, target_path])
-
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=300,
-                cwd=self.working_dir,
-            )
-
-            if result.returncode != 0:
-                error_msg = result.stderr or result.stdout
-                raise GitError(f"git clone failed: {error_msg}")
-
-            return {
-                "repo_url": repo_url,
-                "path": os.path.relpath(target_path, self.working_dir),
-                "absolute_path": target_path,
-                "branch": branch,
-                "depth": depth,
-                "success": True,
-            }
-        except (PathError, ToolError, GitError):
-            raise
-        except FileNotFoundError:
-            raise GitError("git not found. Please install Git to use clone_repo.")
-        except subprocess.TimeoutExpired:
-            raise GitError("git clone timed out")
-        except Exception as e:
-            raise GitError(f"Failed to clone repository: {e}")
-
-    def run_python(self, code: str, timeout: int = 30, log_path: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Run Python code and return stdout/stderr plus execution metadata.
-
-        Args:
-            code: Python source code to execute
-            timeout: Timeout in seconds
-            log_path: Optional log file path (relative to working_dir)
-
-        Returns:
-            Dict with stdout, stderr, exit_code, timed_out, duration_ms, log_path
-        """
-        try:
-            log_full_path = None
-            if log_path:
-                log_full_path = self._validate_path(log_path)
-                log_dir = os.path.dirname(log_full_path)
-                if log_dir:
-                    os.makedirs(log_dir, exist_ok=True)
-
-            result = self.code_runner.run_python(
-                code=code,
-                cwd=self.working_dir,
-                timeout=timeout,
-                log_path=log_full_path,
-            )
-
-            if log_full_path:
-                result["log_path"] = os.path.relpath(log_full_path, self.working_dir)
-                result["log_path_abs"] = log_full_path
-
-            result["success"] = (not result.get("timed_out")) and result.get("exit_code") == 0
-            return result
-        except PathError:
-            raise
-        except CodeRunError as e:
-            raise ToolError(str(e))
-        except Exception as e:
-            raise ToolError(f"Failed to run Python code: {e}")
-
-    def run_tests(
-        self,
-        framework: str = "pytest",
-        args: Optional[List[str]] = None,
-        timeout: int = 300,
-        log_path: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """
-        Run tests using the specified framework.
-
-        Args:
-            framework: Test framework to run ("pytest" or "unittest")
-            args: Additional arguments to pass to the test runner
-            timeout: Timeout in seconds
-            log_path: Optional log file path (relative to working_dir)
-
-        Returns:
-            Dict with stdout, stderr, exit_code, timed_out, duration_ms, log_path
-        """
-        if framework not in {"pytest", "unittest"}:
-            raise ToolError(f"Unsupported test framework: {framework}")
-        if args is None:
-            args = []
-        if not isinstance(args, list) or not all(isinstance(arg, str) for arg in args):
-            raise ToolError("args must be a list of strings")
-
-        try:
-            log_full_path = None
-            if log_path:
-                log_full_path = self._validate_path(log_path)
-                log_dir = os.path.dirname(log_full_path)
-                if log_dir:
-                    os.makedirs(log_dir, exist_ok=True)
-
-            command = [sys.executable, "-m", framework]
-            command.extend(args)
-
-            result = self.code_runner.run_tests(
-                command=command,
-                cwd=self.working_dir,
-                timeout=timeout,
-                log_path=log_full_path,
-            )
-
-            if log_full_path:
-                result["log_path"] = os.path.relpath(log_full_path, self.working_dir)
-                result["log_path_abs"] = log_full_path
-
-            result["success"] = (not result.get("timed_out")) and result.get("exit_code") == 0
-            return result
-        except PathError:
-            raise
-        except CodeRunError as e:
-            raise ToolError(str(e))
-        except Exception as e:
-            raise ToolError(f"Failed to run tests: {e}")
-    
-    def checkout_branch(self, repo_dir: str, branch_name: str, create: bool = True) -> Dict[str, Any]:
-        """
-        Checkout a git branch in a repository directory.
-        
-        Creates a new branch and checks it out if create=True (default).
-        Switches to an existing branch if create=False.
-        
-        Args:
-            repo_dir: Repository directory (relative to working_dir)
-            branch_name: Branch name to create/checkout
-            create: Whether to create a new branch (default: True)
-            
-        Returns:
-            Dictionary with checkout status and branch name
-            
-        Raises:
-            ToolError: If inputs are invalid or checkout fails
-            PathError: If repo_dir escapes working directory
-            GitError: If git operation fails
-        """
-        try:
-            if not branch_name or not isinstance(branch_name, str):
-                raise ToolError("Branch name must be a non-empty string")
-            
-            # Validate branch name format (git-friendly)
-            if not re.match(r'^[a-zA-Z0-9_][a-zA-Z0-9_/-]*$', branch_name):
-                raise ToolError(
-                    f"Invalid branch name: {branch_name}. "
-                    "Use only alphanumeric, underscore, hyphen, and forward slash. "
-                    "Cannot start with hyphen or slash."
-                )
-            
-            repo_path = self._validate_path(repo_dir)
-            
-            if not os.path.isdir(repo_path):
-                raise ToolError(f"Repository directory not found: {repo_dir}")
-            
-            # Check if it's a git repository
-            git_dir = os.path.join(repo_path, ".git")
-            if not os.path.exists(git_dir):
-                raise GitError(f"Not a git repository: {repo_dir}")
-            
-            # Build git checkout command
-            if create:
-                cmd = ["git", "checkout", "-b", branch_name]
-            else:
-                cmd = ["git", "checkout", branch_name]
-            
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=30,
-                cwd=repo_path,
-            )
-            
-            if result.returncode != 0:
-                error_msg = result.stderr or result.stdout
-                raise GitError(f"git checkout failed: {error_msg}")
-            
-            logger.info(f"Checked out branch '{branch_name}' in {repo_dir}")
-            
-            return {
-                "repo_dir": repo_dir,
-                "branch_name": branch_name,
-                "created": create,
-                "success": True,
-            }
-        
-        except (PathError, ToolError, GitError):
-            raise
-        except FileNotFoundError:
-            raise GitError("git not found. Please install Git to use checkout_branch.")
-        except subprocess.TimeoutExpired:
-            raise GitError("git checkout timed out")
-        except Exception as e:
-            raise GitError(f"Failed to checkout branch: {e}")
-
-    def push_branch(self, repo_dir: str, branch_name: Optional[str] = None, set_upstream: bool = True) -> Dict[str, Any]:
-            """
-            Push a git branch to the remote repository.
-        
-            Args:
-                repo_dir: Repository directory (relative to working_dir)
-                branch_name: Branch name to push (default: current branch)
-                set_upstream: Whether to set upstream tracking (default: True)
-            
-            Returns:
-                Dictionary with push status, branch name, and remote info
-            
-            Raises:
-                ToolError: If inputs are invalid or push fails
-                PathError: If repo_dir escapes working directory
-                GitError: If git operation fails
-            """
-            try:
-                repo_path = self._validate_path(repo_dir)
-            
-                if not os.path.isdir(repo_path):
-                    raise ToolError(f"Repository directory not found: {repo_dir}")
-            
-                # Check if it's a git repository
-                git_dir = os.path.join(repo_path, ".git")
-                if not os.path.exists(git_dir):
-                    raise GitError(f"Not a git repository: {repo_dir}")
-            
-                # Get current branch if not specified
-                if not branch_name:
-                    result = subprocess.run(
-                        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                        capture_output=True,
-                        text=True,
-                        timeout=10,
-                        cwd=repo_path,
-                    )
-                    if result.returncode != 0:
-                        raise GitError("Failed to get current branch name")
-                    branch_name = result.stdout.strip()
-            
-                # Check if remote exists
-                result = subprocess.run(
-                    ["git", "remote"],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                    cwd=repo_path,
-                )
-            
-                if result.returncode != 0 or not result.stdout.strip():
-                    raise GitError("No git remote configured")
-            
-                remote_name = result.stdout.strip().split()[0]  # Use first remote (typically 'origin')
-            
-                # Build push command
-                if set_upstream:
-                    cmd = ["git", "push", "-u", remote_name, branch_name]
-                else:
-                    cmd = ["git", "push", remote_name, branch_name]
-            
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=60,
-                    cwd=repo_path,
-                )
-            
-                if result.returncode != 0:
-                    error_msg = result.stderr or result.stdout
-                    raise GitError(f"git push failed: {error_msg}")
-            
-                logger.info(f"Pushed branch '{branch_name}' to {remote_name}")
-            
-                return {
-                    "repo_dir": repo_dir,
-                    "branch_name": branch_name,
-                    "remote": remote_name,
-                    "set_upstream": set_upstream,
-                    "success": True,
-                }
-        
-            except (PathError, ToolError, GitError):
-                raise
-            except FileNotFoundError:
-                raise GitError("git not found. Please install Git to use push_branch.")
-            except subprocess.TimeoutExpired:
-                raise GitError("git push timed out")
-            except Exception as e:
-                raise GitError(f"Failed to push branch: {e}")
-    
-    def create_pull_request(self, repo_dir: str, title: Optional[str] = None, 
-                           body: Optional[str] = None, base_branch: str = "main") -> Dict[str, Any]:
-            """
-            Create a pull request using GitHub CLI (gh).
-        
-            Requires GitHub CLI to be installed and authenticated.
-        
-            Args:
-                repo_dir: Repository directory (relative to working_dir)
-                title: PR title (default: uses branch name)
-                body: PR description (default: empty)
-                base_branch: Target branch for PR (default: "main")
-            
-            Returns:
-                Dictionary with PR URL and status
-            
-            Raises:
-                ToolError: If inputs are invalid or PR creation fails
-                PathError: If repo_dir escapes working directory
-                GitError: If git/gh operation fails
-            """
-            try:
-                repo_path = self._validate_path(repo_dir)
-            
-                if not os.path.isdir(repo_path):
-                    raise ToolError(f"Repository directory not found: {repo_dir}")
-            
-                # Check if it's a git repository
-                git_dir = os.path.join(repo_path, ".git")
-                if not os.path.exists(git_dir):
-                    raise GitError(f"Not a git repository: {repo_dir}")
-            
-                # Check if gh CLI is available
-                try:
-                    subprocess.run(
-                        ["gh", "--version"],
-                        capture_output=True,
-                        timeout=10,
-                    )
-                except FileNotFoundError:
-                    raise GitError(
-                        "GitHub CLI (gh) not found. Install from https://cli.github.com/ "
-                        "and authenticate with 'gh auth login'"
-                    )
-            
-                # Get current branch name
-                result = subprocess.run(
-                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                    cwd=repo_path,
-                )
-                if result.returncode != 0:
-                    raise GitError("Failed to get current branch name")
-                branch_name = result.stdout.strip()
-            
-                # Use branch name as title if not provided
-                if not title:
-                    title = branch_name.replace('_', ' ').replace('-', ' ').title()
-            
-                # Build gh pr create command
-                cmd = [
-                    "gh", "pr", "create",
-                    "--base", base_branch,
-                    "--head", branch_name,
-                    "--title", title,
-                ]
-            
-                if body:
-                    cmd.extend(["--body", body])
-                else:
-                    cmd.append("--body=")  # Empty body
-            
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                    cwd=repo_path,
-                )
-            
-                if result.returncode != 0:
-                    error_msg = result.stderr or result.stdout
-                    # Check for common errors
-                    if "already exists" in error_msg.lower():
-                        logger.info(f"Pull request already exists for branch '{branch_name}'")
-                        return {
-                            "repo_dir": repo_dir,
-                            "branch_name": branch_name,
-                            "base_branch": base_branch,
-                            "already_exists": True,
-                            "success": True,
-                        }
-                    raise GitError(f"gh pr create failed: {error_msg}")
-            
-                # Extract PR URL from output
-                pr_url = result.stdout.strip().split()[-1] if result.stdout else "unknown"
-            
-                logger.info(f"Created pull request: {pr_url}")
-            
-                return {
-                    "repo_dir": repo_dir,
-                    "branch_name": branch_name,
-                    "base_branch": base_branch,
-                    "title": title,
-                    "pr_url": pr_url,
-                    "success": True,
-                }
-        
-            except (PathError, ToolError, GitError):
-                raise
-            except subprocess.TimeoutExpired:
-                raise GitError("gh pr create timed out")
-            except Exception as e:
-                raise GitError(f"Failed to create pull request: {e}")
-    
     
     def _list_python_packages(self) -> Dict[str, Any]:
         """List installed Python packages."""
@@ -1591,25 +1088,6 @@ class AgentTools:
             return False
         
         return True
-
-    @staticmethod
-    def _derive_repo_dir_name(repo_url: str) -> str:
-        """
-        Derive a repository directory name from a URL or path.
-
-        Examples:
-            https://github.com/org/repo.git -> repo
-            git@github.com:org/repo.git -> repo
-            /path/to/repo -> repo
-        """
-        if not repo_url or not isinstance(repo_url, str):
-            return ""
-
-        cleaned = repo_url.rstrip("/")
-        base = os.path.basename(cleaned)
-        if base.endswith(".git"):
-            base = base[:-4]
-        return base
     
     def confirm_task_complete(self, summary: str = "", deliverables: List[str] = None) -> Dict[str, Any]:
         """
@@ -1701,7 +1179,6 @@ class AgentTools:
 
 # Helper functions for direct use
 def get_tools(working_dir: str = DEFAULT_WORKING_DIR, allowed_tools: Optional[List[str]] = None) -> AgentTools:
-def get_tools(working_dir: str = DEFAULT_WORKING_DIR, allowed_tools: Optional[List[str]] = None) -> AgentTools:
     """
     Factory function to create an AgentTools instance.
 
@@ -1709,16 +1186,13 @@ def get_tools(working_dir: str = DEFAULT_WORKING_DIR, allowed_tools: Optional[Li
     Args:
         working_dir: Root directory for operations
         allowed_tools: Optional list of tool names allowed for the role
-        allowed_tools: Optional list of tool names allowed for the role
         
     Returns:
         AgentTools instance
     """
     return AgentTools(working_dir, allowed_tools=allowed_tools)
-    return AgentTools(working_dir, allowed_tools=allowed_tools)
 
 
-def get_tools_description(allowed_tools: Optional[List[str]] = None) -> str:
 def get_tools_description(allowed_tools: Optional[List[str]] = None) -> str:
     """
     Get a formatted description of all available tools for injection into agent prompts.
@@ -1726,7 +1200,6 @@ def get_tools_description(allowed_tools: Optional[List[str]] = None) -> str:
     Returns:
         Multi-line string describing all tools and their signatures
     """
-    description = """
     description = """
 Available tools (call these methods in your implementation):
 
@@ -1737,7 +1210,6 @@ File Reading:
 File Writing:
   - write_file(path: str, content: str) -> dict: Create or overwrite file (auto-creates directories)
   - append_file(path: str, content: str) -> dict: Append to file or create if missing
-    - edit_file(path: str, diff: str) -> dict: Apply unified diff to file
     - edit_file(path: str, diff: str) -> dict: Apply unified diff to file
 
 Directory Operations:
@@ -1755,14 +1227,6 @@ Package Management:
   - install_package(name: str, version: str = None, language: str = "python") -> dict: Install a package/dependency
   - check_package_installed(name: str, language: str = "python") -> dict: Check if a package is installed and get version
   - list_installed_packages(language: str = "python") -> dict: List all installed packages for a language
-
-Execution:
-    - run_python(code: str, timeout: int = 30, log_path: str = None) -> dict: Execute Python code and return output
-    - run_tests(framework: str = "pytest", args: list = None, timeout: int = 300, log_path: str = None) -> dict: Run tests via pytest or unittest
-
-Git Operations:
-  - clone_repo(repo_url: str, dest_dir: str = None, branch: str = None, depth: int = None) -> dict: Clone a git repo into working_dir
-  - checkout_branch(repo_dir: str, branch_name: str, create: bool = True) -> dict: Create and checkout a new branch (or switch to existing)
 
 Task Completion:
   - confirm_task_complete(summary: str = "", deliverables: list = None) -> dict: Confirm task is complete and provide summary
@@ -1784,21 +1248,14 @@ Security:
 - Installation has a 120 second timeout
 - Only alphanumeric, hyphens, underscores, and dots allowed in package names
 
-Exception types: PathError (invalid path), FileSizeError (>10MB), PackageError (package operations failed), GitError (git operations failed), ToolError (general failures).
+Exception types: PathError (invalid path), FileSizeError (>10MB), PackageError (package operations failed), ToolError (general failures).
 See docs/agents/AGENT_TOOLS_GUIDE.md for detailed examples and patterns.
 """.strip()
 
     if allowed_tools is not None:
         allowed_line = "Allowed tools for your role: " + ", ".join(allowed_tools)
         return f"{description}\n\n{allowed_line}".strip()
-    if allowed_tools is not None:
-        allowed_line = "Allowed tools for your role: " + ", ".join(allowed_tools)
-        return f"{description}\n\n{allowed_line}".strip()
 
-    return description
-
-
-def get_manager_tools_description(allowed_tools: Optional[List[str]] = None) -> str:
     return description
 
 
@@ -1809,7 +1266,6 @@ def get_manager_tools_description(allowed_tools: Optional[List[str]] = None) -> 
     Returns:
         Multi-line string describing assignment tools and their usage
     """
-    description = """
     description = """
 Available task assignment tools:
 
@@ -1844,12 +1300,6 @@ IMPORTANT:
 - The 'auditor' role should typically come AFTER developer tasks (higher sequence number)
 - Call assign_task/assign_tasks multiple times to build your task plan
 """.strip()
-
-    if allowed_tools is not None:
-        allowed_line = "Allowed tools for your role: " + ", ".join(allowed_tools)
-        return f"{description}\n\n{allowed_line}".strip()
-
-    return description
 
     if allowed_tools is not None:
         allowed_line = "Allowed tools for your role: " + ", ".join(allowed_tools)
