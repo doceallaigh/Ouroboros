@@ -480,7 +480,7 @@ class TestCentralCoordinator(MockedNetworkTestCase):
                 mock_developer = Mock()
                 mock_developer.execute_task.return_value = "def foo(): pass"
                 
-                def create_agent_side_effect(config, factory, fs, instance_number=1):
+                def create_agent_side_effect(config, factory, fs, instance_number=1, post_processor=None):
                     if config.get("role") == "manager":
                         return mock_manager
                     else:
@@ -738,7 +738,7 @@ class TestCoordinatorWithReplayMode(MockedNetworkTestCase):
                 # Track how many times Agent is created with manager role
                 manager_creation_count = 0
                 
-                def track_agent_creation(config, factory, fs, instance_number=1):
+                def track_agent_creation(config, factory, fs, instance_number=1, post_processor=None):
                     nonlocal manager_creation_count
                     mock_agent = Mock()
                     if config.get("role") == "manager":

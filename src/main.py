@@ -19,10 +19,11 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Any, Optional
 
-from comms import ChannelFactory, CommunicationError, APIError, extract_content_from_response
+from comms import ChannelFactory, CommunicationError, APIError, extract_content_from_response, OutputPostProcessingStrategy
 from filesystem import FileSystem, ReadOnlyFileSystem, FileSystemError
 from agent_tools import get_tools_description, AgentTools, ToolError
 from agent_tools import get_tools_description, AgentTools, ToolError
+from response_processing import LLMPostProcessor
 import re
 
 # Configure logging
@@ -58,6 +59,7 @@ class Agent:
         channel_factory: ChannelFactory,
         filesystem: FileSystem,
         instance_number: int = 1,
+        post_processor: Optional[OutputPostProcessingStrategy] = None,
     ):
         """
         Initialize an agent.
@@ -67,6 +69,7 @@ class Agent:
             channel_factory: Factory for creating communication channels
             filesystem: Filesystem for storing outputs
             instance_number: Instance number for this role (1-based, formatted as 01, 02, etc.)
+            post_processor: Optional post-processing strategy for responses
             
         Raises:
             OrganizationError: If agent initialization fails
@@ -77,6 +80,7 @@ class Agent:
         self.name = f"{self.role}{instance_number:02d}"
         self.filesystem = filesystem
         self.callback_handler = None  # Will be set by coordinator if callbacks are needed
+        self.post_processor = post_processor  # Store post-processor for response handling
         
         # Inject appropriate tools for each role
         allowed_tools = self.config.get("allowed_tools")
@@ -209,7 +213,7 @@ class Agent:
                     returned_ticks = ticks
 
                 # Extract and store result
-                result = extract_content_from_response(response)
+                result = extract_content_from_response(response, self.post_processor)
 
                 # Append response timestamp and content to the per-query file (only once)
                 if not response_recorded:
@@ -398,7 +402,7 @@ class Agent:
                 else:
                     response = resp_result
                 
-                result = extract_content_from_response(response)
+                result = extract_content_from_response(response, self.post_processor)
                 return result
                 
             except APIError as e:
@@ -712,6 +716,7 @@ class CentralCoordinator:
         replay_mode: bool = False,
         repo_working_dir: Optional[str] = None,
         allow_git_tools: bool = True,
+        post_processor: Optional[OutputPostProcessingStrategy] = None,
     ):
         """
         Initialize the coordinator.
@@ -722,6 +727,7 @@ class CentralCoordinator:
             replay_mode: Whether to run in replay mode
             repo_working_dir: Optional repository working directory for tool execution
             allow_git_tools: Whether git tools are enabled for agents
+            post_processor: Optional post-processing strategy for agent responses
             
         Raises:
             OrganizationError: If initialization fails
@@ -734,6 +740,7 @@ class CentralCoordinator:
             self.replay_mode = replay_mode
             self.repo_working_dir = repo_working_dir
             self.allow_git_tools = allow_git_tools
+            self.post_processor = post_processor  # Store post-processor for agents
             
             # Track instance counts for each role to generate unique names
             self.role_instance_counts: Dict[str, int] = {}
@@ -945,7 +952,8 @@ class CentralCoordinator:
             config_copy,
             self.channel_factory, 
             self.filesystem,
-            instance_number=self.role_instance_counts[role]
+            instance_number=self.role_instance_counts[role],
+            post_processor=self.post_processor
         )
     
     def _extract_assignments_from_tool_calls(self, response: str) -> Optional[List[Dict[str, Any]]]:
@@ -1651,6 +1659,9 @@ For more information, see documentation in docs/
         else:
             logger.info("No repository provided; git tools disabled")
         
+        # Initialize post-processor for LLM responses
+        post_processor = LLMPostProcessor()
+        
         # Initialize coordinator
         try:
             coordinator = CentralCoordinator(
@@ -1659,6 +1670,7 @@ For more information, see documentation in docs/
                 replay_mode=replay_mode,
                 repo_working_dir=repo_working_dir,
                 allow_git_tools=allow_git_tools,
+                post_processor=post_processor,
             )
         except OrganizationError as e:
             logger.error(f"Coordinator initialization failed: {e}")

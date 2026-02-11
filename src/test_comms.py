@@ -13,6 +13,10 @@ from comms import (
     sanitize_input,
     sanitize_output,
     extract_content_from_response,
+    DefaultOutputSanitizationStrategy,
+    DefaultInputSanitizationStrategy,
+    OutputPostProcessingStrategy,
+    InputPreProcessingStrategy,
     Channel,
     APIChannel,
     ReplayChannel,
@@ -21,6 +25,138 @@ from comms import (
     ValidationError,
     APIError,
 )
+from response_processing import LLMPostProcessor
+
+
+class TestDefaultOutputSanitizationStrategy(unittest.TestCase):
+    """Test cases for DefaultOutputSanitizationStrategy class."""
+
+    def test_valid_string(self):
+        """Should return cleaned string for valid input."""
+        strategy = DefaultOutputSanitizationStrategy()
+        result = strategy.process("Hello world")
+        self.assertEqual(result, "Hello world")
+
+    def test_truncate_long_content(self):
+        """Should truncate content exceeding max_length."""
+        strategy = DefaultOutputSanitizationStrategy(max_length=100)
+        long_string = "a" * 1000
+        result = strategy.process(long_string)
+        self.assertEqual(len(result), 100)
+
+    def test_remove_null_bytes(self):
+        """Should remove null bytes from content."""
+        strategy = DefaultOutputSanitizationStrategy()
+        content = "Hello\x00world"
+        result = strategy.process(content)
+        self.assertEqual(result, "Helloworld")
+
+    def test_strip_whitespace(self):
+        """Should strip leading and trailing whitespace."""
+        strategy = DefaultOutputSanitizationStrategy()
+        content = "  Hello world  \n"
+        result = strategy.process(content)
+        self.assertEqual(result, "Hello world")
+
+    def test_invalid_type_raises_error(self):
+        """Should raise ValidationError for non-string input."""
+        strategy = DefaultOutputSanitizationStrategy()
+        with self.assertRaises(ValidationError):
+            strategy.process(12345)
+
+    def test_none_raises_error(self):
+        """Should raise ValidationError for None input."""
+        strategy = DefaultOutputSanitizationStrategy()
+        with self.assertRaises(ValidationError):
+            strategy.process(None)
+
+    def test_custom_max_length(self):
+        """Should respect custom max_length parameter."""
+        strategy = DefaultOutputSanitizationStrategy(max_length=50)
+        long_string = "x" * 1000
+        result = strategy.process(long_string)
+        self.assertEqual(len(result), 50)
+
+    def test_implements_protocol(self):
+        """Should have process method matching OutputPostProcessingStrategy protocol."""
+        strategy = DefaultOutputSanitizationStrategy()
+        self.assertTrue(hasattr(strategy, 'process'))
+        self.assertTrue(callable(strategy.process))
+        # Verify protocol implementation
+        self.assertIsInstance(strategy, OutputPostProcessingStrategy)
+
+
+class TestDefaultInputSanitizationStrategy(unittest.TestCase):
+    """Test cases for DefaultInputSanitizationStrategy class."""
+
+    def test_valid_message(self):
+        """Should return validated message unchanged."""
+        sanitizer = DefaultInputSanitizationStrategy()
+        message = {
+            "messages": [
+                {"role": "system", "content": "You are helpful"},
+                {"role": "user", "content": "Hello"}
+            ]
+        }
+        result = sanitizer.process(message)
+        self.assertEqual(len(result["messages"]), 2)
+
+    def test_non_dict_input_raises_error(self):
+        """Should raise ValidationError for non-dict input."""
+        sanitizer = DefaultInputSanitizationStrategy()
+        with self.assertRaises(ValidationError):
+            sanitizer.process(["not", "a", "dict"])
+
+    def test_missing_messages_field_raises_error(self):
+        """Should raise ValidationError when messages field missing."""
+        sanitizer = DefaultInputSanitizationStrategy()
+        with self.assertRaises(ValidationError):
+            sanitizer.process({"data": "value"})
+
+    def test_empty_messages_list_raises_error(self):
+        """Should raise ValidationError for empty messages list."""
+        sanitizer = DefaultInputSanitizationStrategy()
+        with self.assertRaises(ValidationError):
+            sanitizer.process({"messages": []})
+
+    def test_invalid_message_structure_raises_error(self):
+        """Should raise ValidationError for invalid message structure."""
+        sanitizer = DefaultInputSanitizationStrategy()
+        with self.assertRaises(ValidationError):
+            sanitizer.process({"messages": [{"role": "user"}]})  # missing content
+
+    def test_sanitizes_content(self):
+        """Should sanitize content in each message."""
+        sanitizer = DefaultInputSanitizationStrategy()
+        message = {
+            "messages": [
+                {"role": "user", "content": "  Hello\x00world  "}
+            ]
+        }
+        result = sanitizer.process(message)
+        # Content should be sanitized (null bytes removed, whitespace trimmed)
+        self.assertEqual(result["messages"][0]["content"], "Helloworld")
+
+    def test_truncates_long_content(self):
+        """Should truncate content exceeding max_length."""
+        sanitizer = DefaultInputSanitizationStrategy()
+        long_content = "a" * 20000
+        message = {
+            "messages": [
+                {"role": "user", "content": long_content}
+            ]
+        }
+        result = sanitizer.process(message)
+        # Should be truncated to 10000 (default max for input)
+        self.assertEqual(len(result["messages"][0]["content"]), 10000)
+
+    def test_implements_protocol(self):
+        """Should have process method matching InputPreProcessingStrategy protocol."""
+        sanitizer = DefaultInputSanitizationStrategy()
+        self.assertTrue(hasattr(sanitizer, 'process'))
+        self.assertTrue(callable(sanitizer.process))
+        # Verify protocol implementation
+        self.assertIsInstance(sanitizer, InputPreProcessingStrategy)
 
 
 class TestSanitizeOutput(unittest.TestCase):
@@ -159,7 +295,24 @@ class TestExtractContentFromResponse(unittest.TestCase):
         self.assertEqual(result, "Plain text response")
 
     def test_thinking_tags(self):
-        """Should extract content after </think> tag."""
+        """Should extract content after </think> tag when processor provided."""
+        response = Mock(spec=HTTPXResponse)
+        response.status_code = 200
+        response.json.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "content": "<think>reasoning here</think>\nFinal answer"
+                    }
+                }
+            ]
+        }
+        processor = LLMPostProcessor()
+        result = extract_content_from_response(response, processor)
+        self.assertEqual(result, "Final answer")
+    
+    def test_no_processor(self):
+        """Should not process thinking tags when no processor provided."""
         response = Mock(spec=HTTPXResponse)
         response.status_code = 200
         response.json.return_value = {
@@ -172,8 +325,31 @@ class TestExtractContentFromResponse(unittest.TestCase):
             ]
         }
         result = extract_content_from_response(response)
-        self.assertEqual(result, "Final answer")
-
+        # Without processor, thinking tags should remain
+        self.assertIn("<think>", result)
+        self.assertIn("Final answer", result)    
+    def test_strategy_composition(self):
+        """Should compose post-processor with default sanitization."""
+        response = Mock(spec=HTTPXResponse)
+        response.status_code = 200
+        response.json.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        # Content with thinking tags + null bytes + whitespace
+                        "content": "<think>reasoning</think>\nAnswer\x00text  \n"
+                    }
+                }
+            ]
+        }
+        processor = LLMPostProcessor()
+        result = extract_content_from_response(response, processor)
+        # Should have removed thinking tags (via LLMPostProcessor)
+        self.assertNotIn("<think>", result)
+        # Should have removed null bytes (via DefaultOutputSanitizationStrategy)
+        self.assertNotIn("\x00", result)
+        # Should have trimmed whitespace (via DefaultOutputSanitizationStrategy)
+        self.assertEqual(result, "Answertext")
     def test_non_200_status_raises_error(self):
         """Should raise APIError for non-200 status."""
         response = Mock(spec=HTTPXResponse)
@@ -240,7 +416,7 @@ class TestAPIChannel(unittest.TestCase):
         with self.assertRaises(CommunicationError):
             self.channel.send_message(message)
 
-    @patch('comms.AsyncClient')
+    @patch('comms_resilience.AsyncClient')
     def test_receive_message_success(self, mock_client_class):
         """Should receive and return message successfully."""
         mock_client = AsyncMock()

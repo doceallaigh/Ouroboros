@@ -14,10 +14,62 @@ import json
 import logging
 import re
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Protocol, runtime_checkable
 from httpx import AsyncClient, Response as HTTPXResponse
 
+from comms_resilience import ConnectionPool, RateLimiter, CircuitBreaker
+from comms_observability import CorrelationContext, MessageMetrics
+
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class OutputPostProcessingStrategy(Protocol):
+    """Protocol for post-processing response content.
+    
+    Allows injection of application-specific transformations
+    without coupling the communication layer to business logic.
+    
+    Implementations:
+    - DefaultOutputSanitizationStrategy: Built-in safety sanitization
+    - LLMPostProcessor (response_processing module): Application-specific LLM processing
+    """
+    
+    def process(self, content: str) -> str:
+        """Process and transform response content.
+        
+        Args:
+            content: Raw content to process
+            
+        Returns:
+            Processed content
+        """
+        ...
+
+
+@runtime_checkable
+class InputPreProcessingStrategy(Protocol):
+    """Protocol for pre-processing input messages.
+    
+    Allows validation and sanitization of messages before transmission.
+    
+    Implementations:
+    - DefaultInputSanitizationStrategy: Built-in message validation
+    """
+    
+    def process(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate and process input message.
+        
+        Args:
+            message: Raw message dictionary
+            
+        Returns:
+            Validated and processed message
+            
+        Raises:
+            ValidationError: If message validation fails
+        """
+        ...
 
 
 class CommunicationError(Exception):
@@ -33,6 +85,45 @@ class ValidationError(CommunicationError):
 class APIError(CommunicationError):
     """Raised when API communication fails."""
     pass
+
+
+class DefaultOutputSanitizationStrategy(OutputPostProcessingStrategy):
+    """
+    Default output sanitization strategy for communication safety.
+    
+    Implements: OutputPostProcessingStrategy
+    
+    Enforces baseline safety requirements:
+    - Type validation (must be string)
+    - Length truncation (prevents memory issues)
+    - Null byte removal (prevents string corruption)
+    - Whitespace trimming (consistent output)
+    
+    This is always applied by the comms layer to guarantee content safety.
+    Delegates to sanitize_output() to maintain single source of truth.
+    """
+    
+    def __init__(self, max_length: int = 50000):
+        """Initialize with configurable max length.
+        
+        Args:
+            max_length: Maximum allowed content length
+        """
+        self.max_length = max_length
+    
+    def process(self, content: str) -> str:
+        """Apply sanitization to content.
+        
+        Args:
+            content: Raw content to sanitize
+            
+        Returns:
+            Sanitized content
+            
+        Raises:
+            ValidationError: If content fails validation
+        """
+        return sanitize_output(content, max_length=self.max_length)
 
 
 def sanitize_output(content: str, max_length: int = 50000) -> str:
@@ -51,10 +142,6 @@ def sanitize_output(content: str, max_length: int = 50000) -> str:
     """
     if not isinstance(content, str):
         raise ValidationError(f"Expected string content, got {type(content)}")
-    
-    # Remove thinking tags (extract content after </think> tag)
-    if "</think>" in content:
-        content = content.split("</think>", 1)[1]
     
     # Truncate if too long
     if len(content) > max_length:
@@ -102,15 +189,54 @@ def sanitize_input(message: Dict[str, Any]) -> Dict[str, Any]:
     return message
 
 
-def extract_content_from_response(response: HTTPXResponse) -> str:
+class DefaultInputSanitizationStrategy(InputPreProcessingStrategy):
+    """
+    Default input sanitization strategy for message validation.
+    
+    Implements: InputPreProcessingStrategy
+    
+    Enforces message structure requirements:
+    - Valid dictionary with 'messages' field
+    - Non-empty list of messages
+    - Each message has 'role' and 'content'
+    - Content sanitization applied to each message
+    
+    This is the standard pre-processing applied before sending messages.
+    Delegates to sanitize_input() to maintain single source of truth.
+    """
+    
+    def process(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate and sanitize input message.
+        
+        Args:
+            message: Raw message dictionary
+            
+        Returns:
+            Validated and sanitized message
+            
+        Raises:
+            ValidationError: If message validation fails
+        """
+        return sanitize_input(message)
+
+
+def extract_content_from_response(
+    response: HTTPXResponse,
+    post_processor: Optional[OutputPostProcessingStrategy] = None
+) -> str:
     """
     Extract content from various API response formats.
     
+    Applies a composition of strategies:
+    1. Application-specific post-processing (if provided)
+    2. Default sanitization (always applied for safety)
+    
     Args:
         response: HTTPXResponse object from API
+        post_processor: Optional strategy for post-processing content
         
     Returns:
-        Extracted content string
+        Extracted and sanitized content string
         
     Raises:
         APIError: If response format is invalid
@@ -128,7 +254,13 @@ def extract_content_from_response(response: HTTPXResponse) -> str:
         except Exception:
             result = response.content.decode(errors="replace")
     
-    return sanitize_output(result)
+    # Apply post-processing if strategy provided
+    if post_processor:
+        result = post_processor.process(result)
+    
+    # Always apply default sanitization for safety
+    default_sanitizer = DefaultOutputSanitizationStrategy()
+    return default_sanitizer.process(result)
 
 
 class Channel(ABC):
@@ -169,15 +301,37 @@ class Channel(ABC):
 class APIChannel(Channel):
     """Channel for live API communication."""
     
-    def __init__(self, config: Dict[str, str]):
+    def __init__(
+        self,
+        config: Dict[str, str],
+        connection_pool: Optional[ConnectionPool] = None,
+        rate_limiter: Optional[RateLimiter] = None,
+        circuit_breaker: Optional[CircuitBreaker] = None,
+        metrics: Optional[MessageMetrics] = None,
+    ):
         super().__init__(config)
         self.pending_replies = []
         self.timeout = config.get("timeout", 120)
+        # Use provided pool or create default
+        self.connection_pool = connection_pool or ConnectionPool(
+            timeout_seconds=float(self.timeout)
+        )
+        # Use provided rate limiter or create default (10 req/sec)
+        self.rate_limiter = rate_limiter or RateLimiter(requests_per_second=10.0)
+        # Use provided circuit breaker or create default
+        self.circuit_breaker = circuit_breaker or CircuitBreaker()
+        # Use provided metrics or create default
+        self.metrics = metrics or MessageMetrics()
+        logger.debug(
+            f"Initialized APIChannel for {self.agent_name} with connection pool, "
+            f"rate limiter, circuit breaker, and metrics"
+        )
     
     def send_message(self, message: Dict[str, Any]) -> int:
         """Queue message for sending and return ticks identifier."""
         try:
-            validated_msg = sanitize_input(message)
+            input_sanitizer = DefaultInputSanitizationStrategy()
+            validated_msg = input_sanitizer.process(message)
             ticks = int(time.time() * 1000)
             # store tuple of (payload, ticks)
             self.pending_replies.append((validated_msg, ticks))
@@ -191,12 +345,29 @@ class APIChannel(Channel):
         if not self.pending_replies:
             raise APIError("No pending messages to send")
 
+        # Create correlation ID for request tracing
+        correlation_id = CorrelationContext.new()
+
+        # Check circuit breaker before attempting request
+        if self.circuit_breaker.is_open():
+            error_msg = (
+                f"Circuit breaker is open - refusing requests to "
+                f"prevent cascading failures"
+            )
+            logger.warning(f"[{correlation_id}] {error_msg}")
+            self.metrics.record_error("CircuitBreakerOpen")
+            raise APIError(error_msg)
+
         payload, ticks = self.pending_replies.pop(0)
         endpoint = self.config.get("endpoint", "http://localhost:12345/v1/chat/completions")
 
-        client = AsyncClient()
+        # Apply rate limiting before sending
+        await self.rate_limiter.acquire()
+        
+        client = await self.connection_pool.get_client()
+        start_time = time.time()
         try:
-            logger.debug(f"Sending request to {endpoint} (ticks={ticks})")
+            logger.debug(f"[{correlation_id}] Sending request to {endpoint} (ticks={ticks})")
             response = await client.post(
                 url=endpoint,
                 json=payload,
@@ -204,14 +375,42 @@ class APIChannel(Channel):
             )
             # store ticks for caller to retrieve if needed
             self.last_ticks = ticks
-            logger.debug(f"Received response with status {response.status_code} (ticks={ticks})")
+            
+            # Record metrics
+            duration = time.time() - start_time
+            self.metrics.record_request(duration, response.status_code)
+            
+            logger.debug(
+                f"[{correlation_id}] Received response with status {response.status_code} "
+                f"(ticks={ticks}, duration={duration:.3f}s)"
+            )
+            
+            # Record success in circuit breaker
+            self.circuit_breaker.record_success()
             return response
         except asyncio.TimeoutError:
+            duration = time.time() - start_time
+            self.metrics.record_error("TimeoutError")
+            self.circuit_breaker.record_failure()
+            logger.error(
+                f"[{correlation_id}] API request timed out after {self.timeout}s "
+                f"(duration={duration:.3f}s)"
+            )
             raise APIError(f"API request timed out after {self.timeout}s")
         except Exception as e:
+            duration = time.time() - start_time
+            error_type = type(e).__name__
+            self.metrics.record_error(error_type)
+            self.circuit_breaker.record_failure()
+            logger.error(
+                f"[{correlation_id}] API request failed: {str(e)} "
+                f"(duration={duration:.3f}s)"
+            )
             raise APIError(f"API request failed: {str(e)}")
         finally:
-            await client.aclose()
+            # Clear correlation context after request completes
+            CorrelationContext.clear()
+
 
 
 class ReplayChannel(Channel):
@@ -232,7 +431,8 @@ class ReplayChannel(Channel):
     
     def send_message(self, message: Dict[str, Any]) -> int:
         """Register a send in replay mode and return ticks."""
-        validated_msg = sanitize_input(message)
+        input_sanitizer = DefaultInputSanitizationStrategy()
+        validated_msg = input_sanitizer.process(message)
         ticks = int(time.time() * 1000)
         self.pending_replies.append((validated_msg, ticks))
         logger.debug(f"Replay mode - registered send for {self.agent_name} with ticks={ticks}")
@@ -262,16 +462,32 @@ class ReplayChannel(Channel):
 class ChannelFactory:
     """Factory for creating appropriate communication channels."""
     
-    def __init__(self, replay_mode: bool, replay_data_loader=None):
+    def __init__(
+        self,
+        replay_mode: bool,
+        replay_data_loader=None,
+        connection_pool: Optional[ConnectionPool] = None,
+        rate_limiter: Optional[RateLimiter] = None,
+        circuit_breaker: Optional[CircuitBreaker] = None,
+        metrics: Optional[MessageMetrics] = None,
+    ):
         """
         Initialize factory.
         
         Args:
             replay_mode: Whether to use replay mode
             replay_data_loader: Callable for loading replay data
+            connection_pool: Optional connection pool for API channels
+            rate_limiter: Optional rate limiter for API channels
+            circuit_breaker: Optional circuit breaker for API channels
+            metrics: Optional metrics collector for API channels
         """
         self.replay_mode = replay_mode
         self.replay_data_loader = replay_data_loader
+        self.connection_pool = connection_pool or ConnectionPool()
+        self.rate_limiter = rate_limiter or RateLimiter()
+        self.circuit_breaker = circuit_breaker or CircuitBreaker()
+        self.metrics = metrics or MessageMetrics()
     
     def create_channel(self, agent_config: Dict[str, str]) -> Channel:
         """
@@ -288,4 +504,11 @@ class ChannelFactory:
                 raise CommunicationError("Replay mode requires data loader")
             return ReplayChannel(agent_config, self.replay_data_loader)
         else:
-            return APIChannel(agent_config)
+            return APIChannel(
+                agent_config,
+                self.connection_pool,
+                self.rate_limiter,
+                self.circuit_breaker,
+                self.metrics,
+            )
+
