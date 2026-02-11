@@ -31,7 +31,7 @@ class TestLoadConfig(unittest.TestCase):
         }
         
         with patch('builtins.open', mock_open(read_data=json.dumps(config_data))):
-            with patch('config.json.load', return_value=config_data):
+            with patch('config.config.json.load', return_value=config_data):
                 config = load_config("config.json")
                 self.assertEqual(config, config_data)
 
@@ -44,14 +44,14 @@ class TestLoadConfig(unittest.TestCase):
     def test_load_config_invalid_json(self):
         """Should raise ConfigError for invalid JSON."""
         with patch('builtins.open', mock_open(read_data="invalid json")):
-            with patch('config.json.load', side_effect=json.JSONDecodeError("", "", 0)):
+            with patch('config.config.json.load', side_effect=json.JSONDecodeError("", "", 0)):
                 with self.assertRaises(ConfigError):
                     load_config("invalid.json")
 
     def test_load_config_empty_file(self):
         """Should handle empty config file."""
         with patch('builtins.open', mock_open(read_data="{}")):
-            with patch('config.json.load', return_value={}):
+            with patch('config.config.json.load', return_value={}):
                 config = load_config("empty.json")
                 self.assertEqual(config, {})
 
@@ -74,7 +74,7 @@ class TestLoadConfig(unittest.TestCase):
         }
         
         with patch('builtins.open', mock_open(read_data=json.dumps(config_data))):
-            with patch('config.json.load', return_value=config_data):
+            with patch('config.config.json.load', return_value=config_data):
                 config = load_config("complex.json")
                 self.assertEqual(config, config_data)
 
@@ -281,7 +281,7 @@ class TestConfigIntegration(unittest.TestCase):
         }
         
         with patch('builtins.open', mock_open(read_data=json.dumps(config_data))):
-            with patch('config.json.load', return_value=config_data):
+            with patch('config.config.json.load', return_value=config_data):
                 config = load_config("roles.json")
                 
                 # Validate each agent config
@@ -303,7 +303,7 @@ class TestConfigIntegration(unittest.TestCase):
         }
         
         with patch('builtins.open', mock_open(read_data=json.dumps(config_data))):
-            with patch('config.json.load', return_value=config_data):
+            with patch('config.config.json.load', return_value=config_data):
                 config = load_config("config.json")
                 
                 agent_config = get_config_value(config, "agents.developer")
@@ -331,7 +331,7 @@ class TestConfigIntegration(unittest.TestCase):
         }
         
         with patch('builtins.open', mock_open(read_data=json.dumps(config_data))):
-            with patch('config.json.load', return_value=config_data):
+            with patch('config.config.json.load', return_value=config_data):
                 config = load_config("config.json")
                 
                 default_timeout = get_config_value(config, "timeout")

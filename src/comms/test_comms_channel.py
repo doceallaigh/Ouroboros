@@ -25,7 +25,7 @@ from comms import (
     ValidationError,
     APIError,
 )
-from response_processing import LLMPostProcessor
+from .response_processing import LLMPostProcessor
 
 
 class TestDefaultOutputSanitizationStrategy(unittest.TestCase):
@@ -416,7 +416,7 @@ class TestAPIChannel(unittest.TestCase):
         with self.assertRaises(CommunicationError):
             self.channel.send_message(message)
 
-    @patch('comms_resilience.AsyncClient')
+    @patch('comms.resilience.AsyncClient')
     def test_receive_message_success(self, mock_client_class):
         """Should receive and return message successfully."""
         mock_client = AsyncMock()
@@ -442,7 +442,7 @@ class TestAPIChannel(unittest.TestCase):
         result = asyncio.run(self.channel.receive_message())
         self.assertEqual(result, mock_response)
 
-    @patch('comms.AsyncClient')
+    @patch('comms.channel.AsyncClient')
     def test_receive_message_no_pending_raises_error(self, mock_client_class):
         """Should raise APIError when no pending messages."""
         with self.assertRaises(APIError):

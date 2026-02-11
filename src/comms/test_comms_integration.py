@@ -14,13 +14,13 @@ import unittest
 from unittest.mock import Mock, AsyncMock
 
 from comms import APIChannel, ChannelFactory, APIError
-from comms_resilience import (
+from comms.resilience import (
     ConnectionPool,
     RateLimiter,
     CircuitBreaker,
     MessageBus,
 )
-from comms_observability import CorrelationContext, MessageMetrics
+from comms.observability import CorrelationContext, MessageMetrics
 from httpx import Response as HTTPXResponse
 
 

@@ -17,8 +17,8 @@ import time
 from typing import Any, Dict, Optional, Protocol, runtime_checkable
 from httpx import AsyncClient, Response as HTTPXResponse
 
-from comms_resilience import ConnectionPool, RateLimiter, CircuitBreaker
-from comms_observability import CorrelationContext, MessageMetrics
+from comms.resilience import ConnectionPool, RateLimiter, CircuitBreaker
+from comms.observability import CorrelationContext, MessageMetrics
 
 logger = logging.getLogger(__name__)
 

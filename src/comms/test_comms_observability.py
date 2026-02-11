@@ -1,5 +1,5 @@
 """
-Unit tests for comms_observability module.
+Unit tests for comms.observability module.
 
 Tests request correlation and message metrics.
 """
@@ -8,7 +8,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from comms_observability import (
+from comms.observability import (
     CorrelationContext,
     MessageMetrics,
     correlation_id,

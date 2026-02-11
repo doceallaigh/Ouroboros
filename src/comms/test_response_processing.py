@@ -6,7 +6,7 @@ Tests LLM-specific response processing logic.
 
 import unittest
 
-from response_processing import remove_thinking_tags, process_llm_response, LLMPostProcessor
+from comms.response_processing import remove_thinking_tags, process_llm_response, LLMPostProcessor
 from comms import OutputPostProcessingStrategy
 
 

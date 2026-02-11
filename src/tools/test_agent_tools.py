@@ -13,13 +13,12 @@ import subprocess
 from unittest import mock
 from pathlib import Path
 
-from agent_tools import (
+from tools import (
     AgentTools,
     ToolError,
     PathError,
     FileSizeError,
     PackageError,
-    GitError,
     get_tools,
 )
 
@@ -589,13 +588,13 @@ class TestPackageManagement(unittest.TestCase):
 
     def test_search_package_invalid_language(self):
         """Should handle invalid language gracefully."""
-        from agent_tools import PackageError
+        from tools import PackageError
         with self.assertRaises(PackageError):
             self.tools.search_package("requests", language="ruby")
 
     def test_install_invalid_package_name(self):
         """Should reject installation of packages with invalid names."""
-        from agent_tools import PackageError
+        from tools import PackageError
         with self.assertRaises(PackageError):
             self.tools.install_package("package;rm -rf /", language="python")
 

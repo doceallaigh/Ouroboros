@@ -6,3 +6,4 @@ test_results.txt
 .vscode/
 shared_repo/
 __pycache__/
+.pytest_cache/

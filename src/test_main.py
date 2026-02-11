@@ -34,7 +34,7 @@ class MockedNetworkTestCase(unittest.TestCase):
     def setUpClass(cls):
         """Set up class-level mocks for network calls."""
         # These are in addition to the module-level AsyncClient mock
-        cls.patcher_httpx = patch('comms.AsyncClient')
+        cls.patcher_httpx = patch('comms.channel.AsyncClient')
         cls.mock_httpx = cls.patcher_httpx.start()
     
     @classmethod

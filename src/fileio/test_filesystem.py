@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from filesystem import (
+from fileio import (
     FileSystem,
     ReadOnlyFileSystem,
     FileSystemError,

@@ -1,5 +1,5 @@
 """
-Unit tests for comms_resilience module.
+Unit tests for comms.resilience module.
 
 Tests connection pooling, retry policies, and resilience features.
 """
@@ -9,7 +9,7 @@ import time
 import unittest
 from unittest.mock import Mock, patch, AsyncMock, MagicMock
 
-from comms_resilience import (
+from comms.resilience import (
     ConnectionPool,
     ExponentialBackoffRetry,
     RetryPolicy,
@@ -51,7 +51,7 @@ class TestConnectionPool(unittest.TestCase):
         self.assertEqual(pool.max_keepalive_connections, 50)
         self.assertEqual(pool.timeout_seconds, 120.0)
     
-    @patch('comms_resilience.AsyncClient')
+    @patch('comms.resilience.AsyncClient')
     def test_get_client_initialization(self, mock_async_client):
         """Should initialize client on first get_client call."""
         async def run_test():
@@ -66,7 +66,7 @@ class TestConnectionPool(unittest.TestCase):
         
         asyncio.run(run_test())
     
-    @patch('comms_resilience.AsyncClient')
+    @patch('comms.resilience.AsyncClient')
     def test_get_client_reuses_instance(self, mock_async_client):
         """Should return same client instance on subsequent calls."""
         async def run_test():
@@ -82,7 +82,7 @@ class TestConnectionPool(unittest.TestCase):
         
         asyncio.run(run_test())
     
-    @patch('comms_resilience.AsyncClient')
+    @patch('comms.resilience.AsyncClient')
     def test_close(self, mock_async_client):
         """Should properly close the client."""
         async def run_test():
@@ -99,7 +99,7 @@ class TestConnectionPool(unittest.TestCase):
         
         asyncio.run(run_test())
     
-    @patch('comms_resilience.AsyncClient')
+    @patch('comms.resilience.AsyncClient')
     def test_close_without_initialization(self, mock_async_client):
         """Should handle close gracefully if never initialized."""
         async def run_test():
@@ -761,6 +761,7 @@ class TestMessageBus(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
 

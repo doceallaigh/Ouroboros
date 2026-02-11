@@ -10,7 +10,7 @@ import unittest
 import subprocess
 from unittest import mock
 
-from code_runner import CodeRunner, CodeRunError
+from tools import CodeRunner, CodeRunError
 
 
 class TestCodeRunnerRunTests(unittest.TestCase):
@@ -36,7 +36,7 @@ class TestCodeRunnerRunTests(unittest.TestCase):
         )
         log_path = os.path.join(self.temp_dir, "logs", "output.txt")
 
-        with mock.patch("code_runner.subprocess.run", return_value=completed):
+        with mock.patch("tools.code_runner.subprocess.run", return_value=completed):
             result = self.runner.run_tests(
                 command=["python", "-m", "pytest"],
                 cwd=self.temp_dir,
@@ -59,7 +59,7 @@ class TestCodeRunnerRunTests(unittest.TestCase):
         """Should return timed_out=True on timeout."""
         timeout_exc = subprocess.TimeoutExpired(cmd=["python"], timeout=1, output="out", stderr="err")
 
-        with mock.patch("code_runner.subprocess.run", side_effect=timeout_exc):
+        with mock.patch("tools.code_runner.subprocess.run", side_effect=timeout_exc):
             result = self.runner.run_tests(
                 command=["python", "-m", "pytest"],
                 cwd=self.temp_dir,

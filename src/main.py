@@ -20,10 +20,9 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Any, Optional
 
 from comms import ChannelFactory, CommunicationError, APIError, extract_content_from_response, OutputPostProcessingStrategy
-from filesystem import FileSystem, ReadOnlyFileSystem, FileSystemError
-from agent_tools import get_tools_description, AgentTools, ToolError
-from agent_tools import get_tools_description, AgentTools, ToolError
-from response_processing import LLMPostProcessor
+from fileio import FileSystem, ReadOnlyFileSystem, FileSystemError
+from tools import get_tools_description, AgentTools, ToolError
+from comms.response_processing import LLMPostProcessor
 import re
 
 # Configure logging
