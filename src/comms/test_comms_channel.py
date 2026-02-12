@@ -140,15 +140,15 @@ class TestDefaultInputSanitizationStrategy(unittest.TestCase):
     def test_truncates_long_content(self):
         """Should truncate content exceeding max_length."""
         sanitizer = DefaultInputSanitizationStrategy()
-        long_content = "a" * 20000
+        long_content = "a" * 60000
         message = {
             "messages": [
                 {"role": "user", "content": long_content}
             ]
         }
         result = sanitizer.process(message)
-        # Should be truncated to 10000 (default max for input)
-        self.assertEqual(len(result["messages"][0]["content"]), 10000)
+        # Should be truncated to 50000 (default max for input)
+        self.assertEqual(len(result["messages"][0]["content"]), 50000)
 
     def test_implements_protocol(self):
         """Should have process method matching InputPreProcessingStrategy protocol."""
@@ -256,7 +256,7 @@ class TestSanitizeInput(unittest.TestCase):
 
     def test_truncates_long_content(self):
         """Should truncate long message content."""
-        long_content = "x" * 20000
+        long_content = "x" * 60000
         message = {
             "messages": [
                 {"role": "user", "content": long_content}

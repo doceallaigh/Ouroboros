@@ -18,6 +18,7 @@ Responsibilities (delegated to submodules):
 import argparse
 import json
 import logging
+import shutil
 import os
 import sys
 from typing import Optional
@@ -178,6 +179,24 @@ For more information, see documentation in docs/
                     repo_working_dir = clone_result["absolute_path"]
                     allow_git_tools = True
                     logger.info(f"Cloned repository to: {repo_working_dir}")
+
+                # Populate session src directory with repo contents if empty
+                try:
+                    if os.path.isdir(repo_working_dir) and not os.listdir(filesystem.src_dir):
+                        shutil.copytree(
+                            repo_working_dir,
+                            filesystem.src_dir,
+                            dirs_exist_ok=True,
+                            ignore=shutil.ignore_patterns(
+                                ".git",
+                                "shared_repo",
+                                "__pycache__",
+                                "*.pyc",
+                            ),
+                        )
+                        logger.info(f"Copied repository into session src: {filesystem.src_dir}")
+                except Exception as e:
+                    logger.error(f"Failed to populate session src directory: {e}")
             except (ToolError, FileSystemError) as e:
                 logger.error(f"Repository setup failed: {e}")
                 sys.exit(1)

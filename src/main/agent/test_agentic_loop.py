@@ -45,7 +45,7 @@ class TestAgenticLoop(MockedNetworkTestCase):
         # Mock agent response with confirm_task_complete tool call
         completion_response = "Task done!\n```python\nconfirm_task_complete()\n```"
         
-        def mock_execute_tools(agent_arg, response, working_dir):
+        def mock_execute_tools(agent_arg, response, working_dir, message=None):
             # Return proper dict structure with task_complete flag
             return {
                 "tools_executed": True,
@@ -90,7 +90,7 @@ class TestAgenticLoop(MockedNetworkTestCase):
         
         self.mock_channel.receive_message = AsyncMock(side_effect=mock_receive)
         
-        def mock_execute_tools(agent_arg, response, working_dir):
+        def mock_execute_tools(agent_arg, response, working_dir, message=None):
             if "confirm_task_complete" in response:
                 return {
                     "tools_executed": True,
@@ -123,7 +123,7 @@ class TestAgenticLoop(MockedNetworkTestCase):
         """Should stop at max iterations without completion."""
         agent = Agent(self.config, self.mock_channel_factory, self.mock_filesystem, instance_number=1)
         
-        def mock_execute_tools(agent_arg, response, working_dir):
+        def mock_execute_tools(agent_arg, response, working_dir, message=None):
             return {
                 "tools_executed": True,
                 "results": [{"success": True, "code_executed": 20}],

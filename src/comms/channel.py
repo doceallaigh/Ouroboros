@@ -158,6 +158,11 @@ def sanitize_input(message: Dict[str, Any]) -> Dict[str, Any]:
     """
     Validate and sanitize input message structure.
     
+    Supports OpenAI Chat Completions message types:
+    - system, user, developer: require 'role' and 'content'
+    - assistant: requires 'role', 'content' is optional (may have tool_calls instead)
+    - tool: requires 'role', 'tool_call_id', and 'content'
+    
     Args:
         message: Message dictionary to validate
         
@@ -177,14 +182,37 @@ def sanitize_input(message: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(messages, list) or not messages:
         raise ValidationError("'messages' must be non-empty list")
     
-    # Sanitize each message in the list
+    # Sanitize each message according to its role
     for msg in messages:
         if not isinstance(msg, dict):
             raise ValidationError("Each message must be a dict")
-        if "role" not in msg or "content" not in msg:
-            raise ValidationError("Each message must have 'role' and 'content'")
-        # Sanitize content
-        msg["content"] = sanitize_output(msg["content"], max_length=10000)
+        
+        role = msg.get("role")
+        
+        # Tool messages: have role="tool", tool_call_id, content
+        if role == "tool":
+            if "tool_call_id" not in msg:
+                raise ValidationError("Tool messages must have 'tool_call_id'")
+            if "content" in msg and isinstance(msg["content"], str):
+                # Allow larger content for tool responses (file data)
+                msg["content"] = sanitize_output(msg["content"], max_length=50000)
+        # Assistant messages: may have tool_calls instead of/with content
+        elif role == "assistant":
+            # Ensure content field exists (can be empty string)
+            if "content" not in msg:
+                msg["content"] = ""
+            if isinstance(msg["content"], str):
+                msg["content"] = sanitize_output(msg["content"], max_length=50000)
+        # System, user, developer messages: require role and content
+        elif role in ("system", "user", "developer"):
+            if "content" not in msg:
+                raise ValidationError(f"{role} messages must have 'content'")
+            if isinstance(msg["content"], str):
+                msg["content"] = sanitize_output(msg["content"], max_length=50000)
+        else:
+            # Unknown role - be permissive but sanitize content if present
+            if "content" in msg and isinstance(msg["content"], str):
+                msg["content"] = sanitize_output(msg["content"], max_length=50000)
     
     return message
 

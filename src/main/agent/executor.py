@@ -56,6 +56,12 @@ def run_async(coro):
         Result from the coroutine
     """
     loop = get_event_loop()
+    if loop.is_running():
+        temp_loop = asyncio.new_event_loop()
+        try:
+            return temp_loop.run_until_complete(coro)
+        finally:
+            temp_loop.close()
     return loop.run_until_complete(coro)
 
 
@@ -124,6 +130,7 @@ def _format_function_call(func_name: str, arguments: dict) -> str:
     # For known functions, we know their positional argument order
     positional_params = {
         "assign_task": ["role", "task", "sequence"],
+        "assign_tasks": ["assignments"],
         "write_file": ["path", "content"],
         "read_file": ["path"],
         "append_file": ["path", "content"],

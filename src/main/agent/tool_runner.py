@@ -4,15 +4,18 @@ Tool execution from agent responses.
 Extracts and executes Python code blocks containing tool calls.
 """
 
+import ast
 import json
 import logging
 import re
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List, Tuple
 
 from tools import AgentTools, ToolError
 from tools.code_runner import CodeRunner
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_PAGE_LINES = 500
 
 
 def execute_tools_from_response(agent, response: str, working_dir: str = ".", message: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -47,17 +50,20 @@ def execute_tools_from_response(agent, response: str, working_dir: str = ".", me
         structured_tool_calls = message.get("tool_calls", []) or []
 
     if not code_blocks and not structured_tool_calls:
-        logger.debug(f"No tool calls found in response from {agent.name}")
-        return {
-            "tools_executed": False,
-            "message": "No tool calls found in response"
-        }
+        inline_calls = _extract_inline_calls(response, allowed_tools)
+        if not inline_calls:
+            logger.debug(f"No tool calls found in response from {agent.name}")
+            return {
+                "tools_executed": False,
+                "message": "No tool calls found in response"
+            }
     
     results = []
     total_calls = 0
     files_produced = set()  # Track files created/modified
     audit_requests = []  # Track audit requests
     task_complete_detected = False
+    tool_outputs = []
     
     def is_allowed(tool_name: str) -> bool:
         return allowed_tools is None or tool_name in allowed_tools
@@ -77,15 +83,25 @@ def execute_tools_from_response(agent, response: str, working_dir: str = ".", me
         
         # Create a safe execution environment with tools available
         exec_globals = {
-            'read_file': tools.read_file,
-            'write_file': tools.write_file,
-            'append_file': tools.append_file,
-            'edit_file': tools.edit_file,
-            'list_directory': tools.list_directory,
-            'list_all_files': tools.list_all_files,
-            'search_files': tools.search_files,
-            'get_file_info': tools.get_file_info,
-            'delete_file': tools.delete_file,
+            'read_file': _capture_output_wrapper(
+                tool_outputs, "read_file", tools.read_file, supports_page=True
+            ),
+            'write_file': _capture_output_wrapper(tool_outputs, "write_file", tools.write_file),
+            'append_file': _capture_output_wrapper(tool_outputs, "append_file", tools.append_file),
+            'edit_file': _capture_output_wrapper(tool_outputs, "edit_file", tools.edit_file),
+            'list_directory': _capture_output_wrapper(
+                tool_outputs, "list_directory", tools.list_directory, supports_page=True
+            ),
+            'list_all_files': _capture_output_wrapper(
+                tool_outputs, "list_all_files", tools.list_all_files, supports_page=True
+            ),
+            'search_files': _capture_output_wrapper(
+                tool_outputs, "search_files", tools.search_files, supports_page=True
+            ),
+            'get_file_info': _capture_output_wrapper(
+                tool_outputs, "get_file_info", tools.get_file_info, supports_page=True
+            ),
+            'delete_file': _capture_output_wrapper(tool_outputs, "delete_file", tools.delete_file),
             'print': lambda *args, **kwargs: None,  # Suppress print statements
         }
 
@@ -93,7 +109,7 @@ def execute_tools_from_response(agent, response: str, working_dir: str = ".", me
             def clone_repo_wrapper(repo_url, dest_dir=None, branch=None, depth=None):
                 effective_branch = branch or default_git_branch
                 return tools.clone_repo(repo_url, dest_dir=dest_dir, branch=effective_branch, depth=depth)
-            exec_globals['clone_repo'] = clone_repo_wrapper
+            exec_globals['clone_repo'] = _capture_output_wrapper(tool_outputs, "clone_repo", clone_repo_wrapper)
         else:
             def clone_repo_blocked(*_args, **_kwargs):
                 raise ToolError("Tool not allowed for this role: clone_repo")
@@ -101,14 +117,19 @@ def execute_tools_from_response(agent, response: str, working_dir: str = ".", me
 
         if is_allowed("run_python"):
             code_runner = CodeRunner()
-            exec_globals['run_python'] = lambda code, timeout=30, log_path=None: code_runner.run_python(code, working_dir, timeout, log_path)
+            exec_globals['run_python'] = _capture_output_wrapper(
+                tool_outputs,
+                "run_python",
+                lambda code, timeout=30, log_path=None: code_runner.run_python(code, working_dir, timeout, log_path),
+                supports_page=True,
+            )
         else:
             def run_python_blocked(*_args, **_kwargs):
                 raise ToolError("Tool not allowed for this role: run_python")
             exec_globals['run_python'] = run_python_blocked
         
         if is_allowed("checkout_branch"):
-            exec_globals['checkout_branch'] = tools.checkout_branch
+            exec_globals['checkout_branch'] = _capture_output_wrapper(tool_outputs, "checkout_branch", tools.checkout_branch)
         else:
             def checkout_branch_blocked(*_args, **_kwargs):
                 raise ToolError("Tool not allowed for this role: checkout_branch")
@@ -116,7 +137,11 @@ def execute_tools_from_response(agent, response: str, working_dir: str = ".", me
 
         if is_allowed("raise_callback"):
             from main.agent.callbacks import raise_callback
-            exec_globals['raise_callback'] = lambda message, callback_type="query": raise_callback(agent, message, callback_type)
+            exec_globals['raise_callback'] = _capture_output_wrapper(
+                tool_outputs,
+                "raise_callback",
+                lambda message, callback_type="query": raise_callback(agent, message, callback_type),
+            )
         else:
             def raise_callback_blocked(*_args, **_kwargs):
                 raise ToolError("Tool not allowed for this role: raise_callback")
@@ -133,13 +158,17 @@ def execute_tools_from_response(agent, response: str, working_dir: str = ".", me
                     "focus_areas": focus_areas or []
                 })
                 return result
-            exec_globals['audit_files'] = audit_files_wrapper
+            exec_globals['audit_files'] = _capture_output_wrapper(tool_outputs, "audit_files", audit_files_wrapper, supports_page=True)
         else:
-            exec_globals['audit_files'] = tools.audit_files
+            exec_globals['audit_files'] = _capture_output_wrapper(tool_outputs, "audit_files", tools.audit_files, supports_page=True)
         
         # Add confirm_task_complete for non-developer roles
         if agent.role != "developer":
-            exec_globals['confirm_task_complete'] = tools.confirm_task_complete
+            exec_globals['confirm_task_complete'] = _capture_output_wrapper(
+                tool_outputs,
+                "confirm_task_complete",
+                tools.confirm_task_complete,
+            )
         
         exec_locals = {}
         
@@ -184,15 +213,15 @@ def execute_tools_from_response(agent, response: str, working_dir: str = ".", me
         # Reuse the same exec_globals environment from above if available
         if 'exec_globals' not in locals():
             exec_globals = {
-                'read_file': tools.read_file,
-                'write_file': tools.write_file,
-                'append_file': tools.append_file,
-                'edit_file': tools.edit_file,
-                'list_directory': tools.list_directory,
-                'list_all_files': tools.list_all_files,
-                'search_files': tools.search_files,
-                'get_file_info': tools.get_file_info,
-                'delete_file': tools.delete_file,
+                'read_file': _capture_output_wrapper(tool_outputs, "read_file", tools.read_file, supports_page=True),
+                'write_file': _capture_output_wrapper(tool_outputs, "write_file", tools.write_file),
+                'append_file': _capture_output_wrapper(tool_outputs, "append_file", tools.append_file),
+                'edit_file': _capture_output_wrapper(tool_outputs, "edit_file", tools.edit_file),
+                'list_directory': _capture_output_wrapper(tool_outputs, "list_directory", tools.list_directory, supports_page=True),
+                'list_all_files': _capture_output_wrapper(tool_outputs, "list_all_files", tools.list_all_files, supports_page=True),
+                'search_files': _capture_output_wrapper(tool_outputs, "search_files", tools.search_files, supports_page=True),
+                'get_file_info': _capture_output_wrapper(tool_outputs, "get_file_info", tools.get_file_info, supports_page=True),
+                'delete_file': _capture_output_wrapper(tool_outputs, "delete_file", tools.delete_file),
                 'print': lambda *args, **kwargs: None,
             }
 
@@ -200,7 +229,7 @@ def execute_tools_from_response(agent, response: str, working_dir: str = ".", me
                 def clone_repo_wrapper(repo_url, dest_dir=None, branch=None, depth=None):
                     effective_branch = branch or default_git_branch
                     return tools.clone_repo(repo_url, dest_dir=dest_dir, branch=effective_branch, depth=depth)
-                exec_globals['clone_repo'] = clone_repo_wrapper
+                exec_globals['clone_repo'] = _capture_output_wrapper(tool_outputs, "clone_repo", clone_repo_wrapper)
             else:
                 def clone_repo_blocked(*_args, **_kwargs):
                     raise ToolError("Tool not allowed for this role: clone_repo")
@@ -208,14 +237,19 @@ def execute_tools_from_response(agent, response: str, working_dir: str = ".", me
 
             if is_allowed("run_python"):
                 code_runner = CodeRunner()
-                exec_globals['run_python'] = lambda code, timeout=30, log_path=None: code_runner.run_python(code, working_dir, timeout, log_path)
+                exec_globals['run_python'] = _capture_output_wrapper(
+                    tool_outputs,
+                    "run_python",
+                    lambda code, timeout=30, log_path=None: code_runner.run_python(code, working_dir, timeout, log_path),
+                    supports_page=True,
+                )
             else:
                 def run_python_blocked(*_args, **_kwargs):
                     raise ToolError("Tool not allowed for this role: run_python")
                 exec_globals['run_python'] = run_python_blocked
 
             if is_allowed("checkout_branch"):
-                exec_globals['checkout_branch'] = tools.checkout_branch
+                exec_globals['checkout_branch'] = _capture_output_wrapper(tool_outputs, "checkout_branch", tools.checkout_branch)
             else:
                 def checkout_branch_blocked(*_args, **_kwargs):
                     raise ToolError("Tool not allowed for this role: checkout_branch")
@@ -223,7 +257,11 @@ def execute_tools_from_response(agent, response: str, working_dir: str = ".", me
 
             if is_allowed("raise_callback"):
                 from main.agent.callbacks import raise_callback
-                exec_globals['raise_callback'] = lambda message, callback_type="query": raise_callback(agent, message, callback_type)
+                exec_globals['raise_callback'] = _capture_output_wrapper(
+                    tool_outputs,
+                    "raise_callback",
+                    lambda message, callback_type="query": raise_callback(agent, message, callback_type),
+                )
             else:
                 def raise_callback_blocked(*_args, **_kwargs):
                     raise ToolError("Tool not allowed for this role: raise_callback")
@@ -238,12 +276,16 @@ def execute_tools_from_response(agent, response: str, working_dir: str = ".", me
                         "focus_areas": focus_areas or []
                     })
                     return result
-                exec_globals['audit_files'] = audit_files_wrapper
+                exec_globals['audit_files'] = _capture_output_wrapper(tool_outputs, "audit_files", audit_files_wrapper, supports_page=True)
             else:
-                exec_globals['audit_files'] = tools.audit_files
+                exec_globals['audit_files'] = _capture_output_wrapper(tool_outputs, "audit_files", tools.audit_files, supports_page=True)
 
             if agent.role != "developer":
-                exec_globals['confirm_task_complete'] = tools.confirm_task_complete
+                exec_globals['confirm_task_complete'] = _capture_output_wrapper(
+                    tool_outputs,
+                    "confirm_task_complete",
+                    tools.confirm_task_complete,
+                )
 
         for tool_call in structured_tool_calls:
             if tool_call.get("type") != "function":
@@ -284,6 +326,51 @@ def execute_tools_from_response(agent, response: str, working_dir: str = ".", me
                     "tool": func_name,
                     "error": str(e),
                 })
+
+    # Execute inline tool calls (plain text) when no code blocks/structured calls
+    if not code_blocks and not structured_tool_calls:
+        exec_globals = _build_exec_globals(agent, tools, allowed_tools, default_git_branch, working_dir, files_produced, audit_requests)
+        inline_calls = _extract_inline_calls(response, allowed_tools)
+        for func_name, args, kwargs in inline_calls:
+            if agent.role == "developer" and func_name == "confirm_task_complete":
+                results.append({
+                    "success": False,
+                    "tool": func_name,
+                    "error": "Developers cannot use confirm_task_complete",
+                })
+                continue
+            if func_name not in exec_globals:
+                results.append({
+                    "success": False,
+                    "tool": func_name,
+                    "error": f"Unknown tool: {func_name}",
+                })
+                continue
+            try:
+                exec_globals[func_name](*args, **kwargs)
+                total_calls += 1
+                if agent.role == "developer" and func_name in ("write_file", "append_file", "edit_file"):
+                    path = None
+                    if kwargs and "path" in kwargs:
+                        path = kwargs.get("path")
+                    elif args:
+                        path = args[0]
+                    if path:
+                        files_produced.add(path)
+                if func_name == "confirm_task_complete":
+                    task_complete_detected = True
+                results.append({
+                    "success": True,
+                    "tool": func_name,
+                })
+                logger.info(f"Agent {agent.name} executed inline tool call: {func_name}")
+            except Exception as e:
+                logger.error(f"Inline tool execution failed for {agent.name}: {e}")
+                results.append({
+                    "success": False,
+                    "tool": func_name,
+                    "error": str(e),
+                })
     
     # Check if task completion was signaled via code blocks
     for code_block in code_blocks:
@@ -297,7 +384,8 @@ def execute_tools_from_response(agent, response: str, working_dir: str = ".", me
         "code_blocks_executed": len([r for r in results if r.get("success")]),
         "estimated_tool_calls": total_calls,
         "results": results,
-        "task_complete": task_complete_detected
+        "task_complete": task_complete_detected,
+        "tool_outputs": tool_outputs
     }
     
     # Add tracking info for developer role
@@ -308,3 +396,167 @@ def execute_tools_from_response(agent, response: str, working_dir: str = ".", me
             logger.warning(f"Developer {agent.name} requested audits but produced no files")
     
     return result_dict
+
+
+def _capture_output_wrapper(
+    tool_outputs: List[Dict[str, Any]],
+    tool_name: str,
+    func,
+    supports_page: bool = False,
+):
+    def wrapper(*args, **kwargs):
+        page = None
+        if supports_page and isinstance(kwargs, dict):
+            page = kwargs.pop("page", None)
+        result = func(*args, **kwargs)
+        page_index = page if isinstance(page, int) and page > 0 else 1
+        output_entry = _format_tool_output(tool_name, args, kwargs, result, page_index)
+        if output_entry:
+            tool_outputs.append(output_entry)
+        return result
+
+    return wrapper
+
+
+def _format_tool_output(
+    tool_name: str,
+    args: Tuple[Any, ...],
+    kwargs: Dict[str, Any],
+    result: Any,
+    page_index: int,
+) -> Optional[Dict[str, Any]]:
+    text = _stringify_tool_output(result)
+    if text is None:
+        return None
+    page_text, total_pages = _paginate_text(text, page_index, DEFAULT_PAGE_LINES)
+    return {
+        "tool": tool_name,
+        "args": list(args),
+        "kwargs": kwargs,
+        "page": page_index,
+        "total_pages": total_pages,
+        "page_lines": DEFAULT_PAGE_LINES,
+        "content": page_text,
+    }
+
+
+def _stringify_tool_output(result: Any) -> Optional[str]:
+    if result is None:
+        return None
+    if isinstance(result, str):
+        return result
+    try:
+        return json.dumps(result, indent=2, ensure_ascii=True)
+    except (TypeError, ValueError):
+        return str(result)
+
+
+def _paginate_text(text: str, page: int, lines_per_page: int) -> Tuple[str, int]:
+    lines = text.splitlines()
+    if not lines:
+        return "", 1
+    total_pages = max(1, (len(lines) + lines_per_page - 1) // lines_per_page)
+    safe_page = max(1, min(page, total_pages))
+    start = (safe_page - 1) * lines_per_page
+    end = start + lines_per_page
+    return "\n".join(lines[start:end]), total_pages
+
+
+def _extract_inline_calls(response: str, allowed_tools: Optional[list]) -> List[Tuple[str, List[Any], Dict[str, Any]]]:
+    allowed_names = set(allowed_tools or [])
+    calls = []
+    for line in response.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if not allowed_names or any(line.startswith(f"{name}(") for name in allowed_names):
+            try:
+                node = ast.parse(line, mode="eval")
+            except SyntaxError:
+                continue
+            call = node.body
+            if isinstance(call, ast.Call) and isinstance(call.func, ast.Name):
+                func_name = call.func.id
+                if allowed_names and func_name not in allowed_names:
+                    continue
+                args = []
+                kwargs = {}
+                try:
+                    for arg in call.args:
+                        args.append(ast.literal_eval(arg))
+                    for kw in call.keywords:
+                        if kw.arg:
+                            kwargs[kw.arg] = ast.literal_eval(kw.value)
+                except (ValueError, SyntaxError):
+                    continue
+                calls.append((func_name, args, kwargs))
+    return calls
+
+
+def _build_exec_globals(agent, tools, allowed_tools, default_git_branch, working_dir, files_produced, audit_requests):
+    def is_allowed(tool_name: str) -> bool:
+        return allowed_tools is None or tool_name in allowed_tools
+
+    exec_globals = {
+        'read_file': tools.read_file,
+        'write_file': tools.write_file,
+        'append_file': tools.append_file,
+        'edit_file': tools.edit_file,
+        'list_directory': tools.list_directory,
+        'list_all_files': tools.list_all_files,
+        'search_files': tools.search_files,
+        'get_file_info': tools.get_file_info,
+        'delete_file': tools.delete_file,
+        'print': lambda *args, **kwargs: None,
+    }
+
+    if is_allowed("clone_repo"):
+        def clone_repo_wrapper(repo_url, dest_dir=None, branch=None, depth=None):
+            effective_branch = branch or default_git_branch
+            return tools.clone_repo(repo_url, dest_dir=dest_dir, branch=effective_branch, depth=depth)
+        exec_globals['clone_repo'] = clone_repo_wrapper
+    else:
+        def clone_repo_blocked(*_args, **_kwargs):
+            raise ToolError("Tool not allowed for this role: clone_repo")
+        exec_globals['clone_repo'] = clone_repo_blocked
+
+    if is_allowed("run_python"):
+        code_runner = CodeRunner()
+        exec_globals['run_python'] = lambda code, timeout=30, log_path=None: code_runner.run_python(code, working_dir, timeout, log_path)
+    else:
+        def run_python_blocked(*_args, **_kwargs):
+            raise ToolError("Tool not allowed for this role: run_python")
+        exec_globals['run_python'] = run_python_blocked
+
+    if is_allowed("checkout_branch"):
+        exec_globals['checkout_branch'] = tools.checkout_branch
+    else:
+        def checkout_branch_blocked(*_args, **_kwargs):
+            raise ToolError("Tool not allowed for this role: checkout_branch")
+        exec_globals['checkout_branch'] = checkout_branch_blocked
+
+    if is_allowed("raise_callback"):
+        from main.agent.callbacks import raise_callback
+        exec_globals['raise_callback'] = lambda message, callback_type="query": raise_callback(agent, message, callback_type)
+    else:
+        def raise_callback_blocked(*_args, **_kwargs):
+            raise ToolError("Tool not allowed for this role: raise_callback")
+        exec_globals['raise_callback'] = raise_callback_blocked
+
+    if agent.role == "developer":
+        def audit_files_wrapper(file_paths, description="", focus_areas=None):
+            result = tools.audit_files(file_paths, description, focus_areas, produced_files=list(files_produced))
+            audit_requests.append({
+                "files": file_paths,
+                "description": description,
+                "focus_areas": focus_areas or []
+            })
+            return result
+        exec_globals['audit_files'] = audit_files_wrapper
+    else:
+        exec_globals['audit_files'] = tools.audit_files
+
+    if agent.role != "developer":
+        exec_globals['confirm_task_complete'] = tools.confirm_task_complete
+
+    return exec_globals
