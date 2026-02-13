@@ -27,7 +27,7 @@ def execute_tools_from_response(agent, response: str, working_dir: str = ".", me
     For developer role:
     - Tracks files produced (write_file, append_file, edit_file calls)
     - Validates audit_files calls only reference produced files
-    - Prevents confirm_task_complete calls (developers cannot mark completion)
+    - Can call confirm_task_complete() to signal task completion
     
     Args:
         agent: Agent instance
@@ -70,16 +70,6 @@ def execute_tools_from_response(agent, response: str, working_dir: str = ".", me
 
     # Execute each code block
     for code_block in code_blocks:
-        # Check for disallowed tool calls in developer role
-        if agent.role == "developer":
-            if 'confirm_task_complete(' in code_block:
-                logger.error(f"Developer {agent.name} attempted to use confirm_task_complete - not allowed")
-                results.append({
-                    "success": False,
-                    "error": "Developers cannot use confirm_task_complete. Task completion must come from manager callback or audit feedback.",
-                    "code": code_block[:200]
-                })
-                continue
         
         # Create a safe execution environment with tools available
         exec_globals = {
@@ -162,13 +152,12 @@ def execute_tools_from_response(agent, response: str, working_dir: str = ".", me
         else:
             exec_globals['audit_files'] = _capture_output_wrapper(tool_outputs, "audit_files", tools.audit_files, supports_page=True)
         
-        # Add confirm_task_complete for non-developer roles
-        if agent.role != "developer":
-            exec_globals['confirm_task_complete'] = _capture_output_wrapper(
-                tool_outputs,
-                "confirm_task_complete",
-                tools.confirm_task_complete,
-            )
+        # Add confirm_task_complete for all roles (developers can now signal completion)
+        exec_globals['confirm_task_complete'] = _capture_output_wrapper(
+            tool_outputs,
+            "confirm_task_complete",
+            tools.confirm_task_complete,
+        )
         
         exec_locals = {}
         
