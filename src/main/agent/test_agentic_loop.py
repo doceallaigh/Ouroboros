@@ -8,6 +8,7 @@ import unittest
 import tempfile
 import os
 import json
+import pytest
 from unittest.mock import Mock, patch, AsyncMock, MagicMock
 
 from main import Agent
@@ -162,6 +163,7 @@ class TestAgenticLoop(unittest.TestCase):
             self.assertFalse(result["task_complete"])
             self.assertEqual(result["iteration_count"], 3)
 
+    @pytest.mark.integration
     def test_developer_read_write_completion(self):
         """
         Integration test: Real Agent → Real ChannelFactory → Real APIChannel →

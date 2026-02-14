@@ -69,11 +69,8 @@ class TestLLMPostProcessor(unittest.TestCase):
     """Test cases for LLMPostProcessor class."""
 
     def test_implements_strategy_interface(self):
-        """Should have process method matching OutputPostProcessingStrategy protocol."""
+        """Should implement OutputPostProcessingStrategy protocol."""
         processor = LLMPostProcessor()
-        self.assertTrue(hasattr(processor, 'process'))
-        self.assertTrue(callable(processor.process))
-        # Verify protocol implementation
         self.assertIsInstance(processor, OutputPostProcessingStrategy)
 
     def test_process_with_thinking_tags(self):

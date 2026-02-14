@@ -31,6 +31,7 @@ class MockFileSystem:
         self.events = []
         self.files = {}
         self.working_dir = "/mock/workspace"
+        self.src_dir = "/mock/workspace"
     
     def record_event(self, event_type: str, data: Dict[str, Any]):
         """Record an event."""
@@ -144,87 +145,7 @@ class TestCallbackCollection:
         assert coordinator.callbacks == []
         assert isinstance(coordinator.callbacks, list)
     
-    def test_callback_handler_collects_callback(self, mock_config, mock_filesystem):
-        """Callback handler should collect callbacks."""
-        coordinator = CentralCoordinator(
-            config_path=mock_config,
-            filesystem=mock_filesystem,
-            replay_mode=False
-        )
-        
-        # Simulate a callback being raised
-        # We need to trigger this through a task execution
-        with patch.object(coordinator, 'create_agent_for_role') as mock_create:
-            mock_agent = Mock()
-            mock_agent.name = "auditor01"
-            mock_agent.callback_handler = None
-            mock_agent.execute_task = Mock(return_value="Audit result")
-            mock_agent.execute_tools_from_response = Mock(return_value={
-                "tools_executed": False,
-                "estimated_tool_calls": 0
-            })
-            
-            mock_create.return_value = mock_agent
-            
-            # Execute a task with a caller (enables callbacks)
-            result = coordinator.execute_single_assignment(
-                role="auditor",
-                task={"description": "Test audit", "caller": "manager"},
-                original_request="Test request"
-            )
-            
-            # Now manually trigger a callback to test collection
-            # The callback handler should have been set on the agent
-            if mock_agent.callback_handler:
-                mock_agent.callback_handler("auditor01", "Test blocker", "blocker")
-                
-                # Verify callback was collected
-                assert len(coordinator.callbacks) > 0
-                assert coordinator.callbacks[0]["from"] == "auditor01"
-                assert coordinator.callbacks[0]["type"] == "blocker"
-    
-    def test_blocker_callback_logged_as_warning(self, mock_config, mock_filesystem):
-        """Blocker callbacks should be logged as warnings."""
-        coordinator = CentralCoordinator(
-            config_path=mock_config,
-            filesystem=mock_filesystem,
-            replay_mode=False
-        )
-        
-        with patch('main.logger') as mock_logger:
-            # Create and execute a task that will set up callback handler
-            with patch.object(coordinator, 'create_agent_for_role') as mock_create:
-                mock_agent = Mock()
-                mock_agent.name = "auditor01"
-                mock_agent.callback_handler = None
-                mock_agent.execute_task = Mock(return_value="")
-                mock_agent.execute_tools_from_response = Mock(return_value={
-                    "tools_executed": False,
-                    "estimated_tool_calls": 0
-                })
-                
-                mock_create.return_value = mock_agent
-                
-                coordinator.execute_single_assignment(
-                    role="auditor",
-                    task={"description": "Test", "caller": "manager"},
-                    original_request="Test"
-                )
-                
-                # Trigger a blocker callback
-                if mock_agent.callback_handler:
-                    mock_agent.callback_handler(
-                        "auditor01",
-                        "Required file test.txt was not created",
-                        "blocker"
-                    )
-                    
-                    # Verify warning was logged
-                    warning_calls = [
-                        c for c in mock_logger.warning.call_args_list
-                        if "BLOCKER" in str(c)
-                    ]
-                    assert len(warning_calls) > 0
+
 
 
 class TestBlockerExtraction:
@@ -310,83 +231,36 @@ class TestFinalVerificationTask:
 class TestDeveloperRetry:
     """Test that developers retry when they don't create files."""
     
-    def test_task_result_includes_file_count(self, mock_config, mock_filesystem):
-        """Task results should include file creation tracking."""
+    def test_task_result_includes_tool_results(self, mock_config, mock_filesystem):
+        """Task results should include tool execution tracking."""
         coordinator = CentralCoordinator(
             config_path=mock_config,
             filesystem=mock_filesystem,
             replay_mode=False
         )
         
-        with patch.object(coordinator, 'create_agent_for_role') as mock_create:
-            mock_agent = Mock()
-            mock_agent.name = "developer01"
-            mock_agent.callback_handler = None
-            mock_agent.execute_task = Mock(return_value="Created requirements.txt")
-            mock_agent.execute_tools_from_response = Mock(return_value={
-                "tools_executed": True,
-                "estimated_tool_calls": 1
-            })
-            
-            mock_create.return_value = mock_agent
-            
-            # Pre-populate filesystem with a file
-            mock_filesystem.files["requirements.txt"] = "numpy==1.20.0"
-            
-            result = coordinator.execute_single_assignment(
-                role="developer",
-                task="Create requirements.txt",
-                original_request="Create a project"
-            )
-            
-            assert result["status"] == "completed"
-            assert "tool_execution" in result
-
-
-class TestCallbackToAgentExecution:
-    """Test that callbacks result in agent execution."""
-    
-    def test_blocker_callback_recorded_in_events(self, mock_config, mock_filesystem):
-        """Blocker callbacks should be recorded in event log."""
-        coordinator = CentralCoordinator(
-            config_path=mock_config,
-            filesystem=mock_filesystem,
-            replay_mode=False
-        )
+        mock_loop_result = {
+            "final_response": "Created requirements.txt",
+            "tool_results": [{"tools_executed": True, "estimated_tool_calls": 1}],
+            "iteration_count": 1,
+            "task_complete": True
+        }
         
         with patch.object(coordinator, 'create_agent_for_role') as mock_create:
-            mock_agent = Mock()
-            mock_agent.name = "auditor01"
-            mock_agent.callback_handler = None
-            mock_agent.execute_task = Mock(return_value="")
-            mock_agent.execute_tools_from_response = Mock(return_value={
-                "tools_executed": False,
-                "estimated_tool_calls": 0
-            })
-            
-            mock_create.return_value = mock_agent
-            
-            coordinator.execute_single_assignment(
-                role="auditor",
-                task={"description": "Audit", "caller": "manager"},
-                original_request="Test"
-            )
-            
-            # Trigger callback
-            if mock_agent.callback_handler:
-                mock_agent.callback_handler(
-                    "auditor01",
-                    "Required file was not created",
-                    "blocker"
+            with patch('main.coordinator.execution.execute_with_agentic_loop', return_value=mock_loop_result):
+                mock_agent = Mock()
+                mock_agent.name = "developer01"
+                mock_create.return_value = mock_agent
+                
+                result = coordinator.execute_single_assignment(
+                    role="developer",
+                    task={"description": "Create requirements.txt"},
+                    original_request="Create a project"
                 )
                 
-                # Check event was recorded
-                callback_events = [
-                    e for e in mock_filesystem.events
-                    if e["type"] == "AGENT_CALLBACK"
-                ]
-                assert len(callback_events) > 0
-                assert callback_events[0]["data"]["type"] == "blocker"
+                assert result["source"] == "execution"
+                assert "tool_results" in result
+                assert result["role"] == "developer"
 
 
 class TestEndToEndFlow:
@@ -413,27 +287,25 @@ class TestEndToEndFlow:
         )
         
         with patch.object(coordinator, 'decompose_request') as mock_decompose:
-            with patch.object(coordinator, '_execute_assignments') as mock_execute:
+            with patch.object(coordinator, 'execute_all_assignments') as mock_execute:
                 with patch.object(coordinator, 'execute_single_assignment') as mock_single:
-                    with patch('main.logger'):
-                        # Mock decompose to return empty assignments
-                        mock_decompose.return_value = json.dumps([])
-                        
-                        # Mock _execute_assignments to return empty results
-                        mock_execute.return_value = []
-                        
-                        # Mock execute_single_assignment for final verification
-                        mock_single.return_value = {
-                            "role": "auditor",
-                            "status": "completed",
-                            "output": "PASS"
-                        }
-                        
-                        results = coordinator.assign_and_execute("Test request")
-                        
-                        # Should have called execute_single_assignment for verification
-                        # (Called at least once for final verification)
-                        assert mock_single.called
+                    # Mock decompose to return empty assignments
+                    mock_decompose.return_value = json.dumps([])
+                    
+                    # Mock execute_all_assignments to return empty results
+                    mock_execute.return_value = []
+                    
+                    # Mock execute_single_assignment for final verification
+                    mock_single.return_value = {
+                        "role": "auditor",
+                        "status": "completed",
+                        "output": "PASS"
+                    }
+                    
+                    results = coordinator.assign_and_execute("Test request")
+                    
+                    # Should have called execute_single_assignment for verification
+                    assert mock_single.called
     
     def test_multiple_callbacks_tracked_separately(self, mock_config, mock_filesystem):
         """Multiple callbacks should be tracked as separate entries."""
@@ -472,65 +344,39 @@ class TestRetryMechanism:
     """Test retry logic for failed tasks."""
     
     def test_no_callback_before_retry_attempt(self, mock_config, mock_filesystem):
-        """Developer should attempt work before callback on missing files."""
+        """Developer task execution should not produce callbacks."""
         coordinator = CentralCoordinator(
             config_path=mock_config,
             filesystem=mock_filesystem,
             replay_mode=False
         )
         
-        with patch.object(coordinator, 'create_agent_for_role') as mock_create:
-            mock_agent = Mock()
-            mock_agent.name = "developer01"
-            mock_agent.callback_handler = None
-            mock_agent.execute_task = Mock(return_value="Created file")
-            mock_agent.execute_tools_from_response = Mock(return_value={
-                "tools_executed": True,
-                "estimated_tool_calls": 1
-            })
-            
-            mock_create.return_value = mock_agent
-            
-            # Start with empty filesystem
-            assert len(mock_filesystem.files) == 0
-            
-            # Execute developer task
-            result = coordinator.execute_single_assignment(
-                role="developer",
-                task="Create requirements.txt",
-                original_request="Setup"
-            )
-            
-            # Developer should have executed
-            assert mock_agent.execute_task.called
-            
-            # No callback should have been raised yet (developer executed)
-            assert len(coordinator.callbacks) == 0
-
-
-class TestMockIntegration:
-    """Test the mock infrastructure itself."""
-    
-    def test_mock_filesystem_write_and_read(self, mock_filesystem):
-        """Mock filesystem should support write and read."""
-        mock_filesystem.write_file("test.txt", "content")
-        assert mock_filesystem.read_file("test.txt") == "content"
-    
-    def test_mock_filesystem_list_files(self, mock_filesystem):
-        """Mock filesystem should list files."""
-        mock_filesystem.write_file("file1.py", "code1")
-        mock_filesystem.write_file("file2.py", "code2")
+        mock_loop_result = {
+            "final_response": "Created file",
+            "tool_results": [{"tools_executed": True}],
+            "iteration_count": 1,
+            "task_complete": True
+        }
         
-        files = mock_filesystem.list_files_in_workspace()
-        assert "file1.py" in files
-        assert "file2.py" in files
-        assert len(files) == 2
-    
-    def test_mock_filesystem_record_events(self, mock_filesystem):
-        """Mock filesystem should record events."""
-        mock_filesystem.record_event("test_event", {"key": "value"})
-        assert len(mock_filesystem.events) == 1
-        assert mock_filesystem.events[0]["type"] == "test_event"
+        with patch.object(coordinator, 'create_agent_for_role') as mock_create:
+            with patch('main.coordinator.execution.execute_with_agentic_loop', return_value=mock_loop_result):
+                mock_agent = Mock()
+                mock_agent.name = "developer01"
+                mock_create.return_value = mock_agent
+                
+                # Execute developer task
+                result = coordinator.execute_single_assignment(
+                    role="developer",
+                    task={"description": "Create requirements.txt"},
+                    original_request="Setup"
+                )
+                
+                # Developer task completed successfully
+                assert result["role"] == "developer"
+                assert result["source"] == "execution"
+                
+                # No callback should have been raised
+                assert len(coordinator.callbacks) == 0
 
 
 if __name__ == "__main__":

@@ -76,13 +76,13 @@ class TestCentralCoordinator(MockedNetworkTestCase):
     def test_create_agent_for_role(self, mock_open):
         """Should create agent for specified role."""
         with patch('main.coordinator.coordinator.json.load', return_value=self.config):
-            with patch('main.agent.Agent') as mock_agent_class:
+            with patch('main.agent.agent_factory.Agent') as mock_agent_class:
                 coordinator = CentralCoordinator(self.config_path, self.mock_filesystem)
                 
                 agent = coordinator.create_agent_for_role("developer")
                 
                 # Verify Agent was instantiated
-                self.assertIsNotNone(agent)
+                mock_agent_class.assert_called_once()
 
     @patch('builtins.open')
     def test_create_agent_filters_git_tools_when_disabled(self, mock_open):
@@ -103,8 +103,16 @@ class TestCentralCoordinator(MockedNetworkTestCase):
                 allow_git_tools=False
             )
             
-            # Just verify it doesn't error out
             self.assertFalse(coordinator.allow_git_tools)
+            
+            # Verify git tools are actually stripped when creating an agent
+            with patch('main.agent.agent_factory.Agent') as mock_agent_class:
+                agent = coordinator.create_agent_for_role("developer")
+                call_config = mock_agent_class.call_args[0][0]
+                allowed = call_config.get("allowed_tools", [])
+                self.assertIn("read_file", allowed)
+                self.assertNotIn("clone_repo", allowed)
+                self.assertNotIn("checkout_branch", allowed)
 
     @patch('builtins.open')
     def test_create_agent_for_missing_role(self, mock_open):
@@ -152,7 +160,10 @@ class TestCentralCoordinator(MockedNetworkTestCase):
                             with patch.object(coordinator, 'validate_assignment_roles', return_value=[]):
                                 results = coordinator.assign_and_execute("Build something")
                                 
-                                self.assertIsNotNone(results)
+                                self.assertIsInstance(results, list)
+                                self.assertEqual(len(results), 1)  # Final verification result
+                                self.assertEqual(results[0]["role"], "auditor")
+                                self.assertEqual(results[0]["status"], "completed")
 
     @patch('builtins.open')
     def test_execute_assignments_with_sequence(self, mock_open):
@@ -205,18 +216,27 @@ class TestCentralCoordinator(MockedNetworkTestCase):
         with patch('main.coordinator.coordinator.json.load', return_value=self.config):
             coordinator = CentralCoordinator(self.config_path, self.mock_filesystem)
             
+            mock_loop_result = {
+                "final_response": "Task output",
+                "tool_results": [],
+                "iteration_count": 1,
+                "task_complete": True
+            }
+            
             with patch.object(coordinator, 'create_agent_for_role') as mock_create:
-                mock_agent = Mock()
-                mock_agent.execute_task.return_value = "Task output"
-                mock_create.return_value = mock_agent
-                
-                result = coordinator.execute_single_assignment(
-                    "developer",
-                    {"description": "Write a function"},
-                    "Original request"
-                )
-                
-                self.assertEqual(result["role"], "developer")
+                with patch('main.coordinator.execution.execute_with_agentic_loop', return_value=mock_loop_result):
+                    mock_agent = Mock()
+                    mock_agent.name = "developer01"
+                    mock_create.return_value = mock_agent
+                    
+                    result = coordinator.execute_single_assignment(
+                        "developer",
+                        {"description": "Write a function"},
+                        "Original request"
+                    )
+                    
+                    self.assertEqual(result["role"], "developer")
+                    self.assertEqual(result["source"], "execution")
 
     @patch('builtins.open')
     def test_execute_single_assignment_failure(self, mock_open):

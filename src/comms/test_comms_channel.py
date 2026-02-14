@@ -78,11 +78,8 @@ class TestDefaultOutputSanitizationStrategy(unittest.TestCase):
         self.assertEqual(len(result), 50)
 
     def test_implements_protocol(self):
-        """Should have process method matching OutputPostProcessingStrategy protocol."""
+        """Should implement OutputPostProcessingStrategy protocol."""
         strategy = DefaultOutputSanitizationStrategy()
-        self.assertTrue(hasattr(strategy, 'process'))
-        self.assertTrue(callable(strategy.process))
-        # Verify protocol implementation
         self.assertIsInstance(strategy, OutputPostProcessingStrategy)
 
 
@@ -151,11 +148,8 @@ class TestDefaultInputSanitizationStrategy(unittest.TestCase):
         self.assertEqual(len(result["messages"][0]["content"]), 50000)
 
     def test_implements_protocol(self):
-        """Should have process method matching InputPreProcessingStrategy protocol."""
+        """Should implement InputPreProcessingStrategy protocol."""
         sanitizer = DefaultInputSanitizationStrategy()
-        self.assertTrue(hasattr(sanitizer, 'process'))
-        self.assertTrue(callable(sanitizer.process))
-        # Verify protocol implementation
         self.assertIsInstance(sanitizer, InputPreProcessingStrategy)
 
 
@@ -255,7 +249,7 @@ class TestSanitizeInput(unittest.TestCase):
         self.assertEqual(result["messages"][0]["content"], "Hello")
 
     def test_truncates_long_content(self):
-        """Should truncate long message content."""
+        """Should truncate long message content to max_length."""
         long_content = "x" * 60000
         message = {
             "messages": [
@@ -263,7 +257,7 @@ class TestSanitizeInput(unittest.TestCase):
             ]
         }
         result = sanitize_input(message)
-        self.assertLess(len(result["messages"][0]["content"]), len(long_content))
+        self.assertEqual(len(result["messages"][0]["content"]), 50000)
 
 
 class TestExtractContentFromResponse(unittest.TestCase):

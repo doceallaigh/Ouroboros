@@ -176,9 +176,6 @@ class TestExponentialBackoffRetry(unittest.TestCase):
     
     def test_implements_retry_policy_protocol(self):
         """Should implement RetryPolicy protocol."""
-        self.assertTrue(hasattr(self.policy, 'should_retry'))
-        self.assertTrue(hasattr(self.policy, 'get_delay'))
-        self.assertTrue(hasattr(self.policy, 'max_attempts'))
         self.assertIsInstance(self.policy, RetryPolicy)
     
     def test_default_values(self):

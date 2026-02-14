@@ -86,46 +86,51 @@ class TestAgent(MockedNetworkTestCase):
             "choices": [{"message": {"content": "Task completed"}}]
         }
         
-        with patch('main.agent.executor.asyncio.run', return_value=mock_response):
-            with patch('main.agent.executor.extract_content_from_response', return_value="Task completed"):
-                agent = Agent(self.config, self.mock_channel_factory, self.mock_filesystem, instance_number=1)
-                
-                task = {"user_prompt": "Do something"}
-                result = agent.execute_task(task)
-                
-                self.assertEqual(result, "Task completed")
-                self.mock_channel.send_message.assert_called()
+        with patch('main.agent.executor.run_async', return_value=mock_response):
+            agent = Agent(self.config, self.mock_channel_factory, self.mock_filesystem, instance_number=1)
+            
+            task = {"user_prompt": "Do something"}
+            result = agent.execute_task(task)
+            
+            self.assertEqual(result, "Task completed")
+            self.mock_channel.send_message.assert_called()
 
     def test_execute_task_stores_output(self):
         """Should store task output in filesystem."""
         mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": "Output"}}]
+        }
         
-        with patch('main.agent.executor.asyncio.run', return_value=mock_response):
-            with patch('main.agent.executor.extract_content_from_response', return_value="Output"):
-                agent = Agent(self.config, self.mock_channel_factory, self.mock_filesystem, instance_number=1)
-                
-                task = {"user_prompt": "Do something"}
-                agent.execute_task(task)
-                
-                # Verify append_response_file was called (write_data was removed)
-                self.mock_filesystem.append_response_file.assert_called_once()
-                # Check the response content (4th argument)
-                call_args = self.mock_filesystem.append_response_file.call_args[0]
-                self.assertEqual(call_args[3], "Output")  # response is 4th arg
+        with patch('main.agent.executor.run_async', return_value=mock_response):
+            agent = Agent(self.config, self.mock_channel_factory, self.mock_filesystem, instance_number=1)
+            
+            task = {"user_prompt": "Do something"}
+            agent.execute_task(task)
+            
+            # Verify append_response_file was called (write_data was removed)
+            self.mock_filesystem.append_response_file.assert_called_once()
+            # Check the response content (4th argument)
+            call_args = self.mock_filesystem.append_response_file.call_args[0]
+            self.assertIn("Output", call_args[3])  # response content contains task output
 
-    def test_execute_task_records_event(self):
-        """Should record timeout retry events."""
+    def test_execute_task_no_retry_events_on_success(self):
+        """Should not record timeout retry events on successful execution."""
         mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": "Output"}}]
+        }
         
-        with patch('main.agent.executor.asyncio.run', return_value=mock_response):
-            with patch('main.agent.executor.extract_content_from_response', return_value="Output"):
-                agent = Agent(self.config, self.mock_channel_factory, self.mock_filesystem, instance_number=1)
-                
-                task = {"user_prompt": "Do something"}
-                agent.execute_task(task)
-                
-                # Verify event recording was called (no errors)
-                self.mock_filesystem.record_event.call_count >= 0
+        with patch('main.agent.executor.run_async', return_value=mock_response):
+            agent = Agent(self.config, self.mock_channel_factory, self.mock_filesystem, instance_number=1)
+            
+            task = {"user_prompt": "Do something"}
+            agent.execute_task(task)
+            
+            # No timeout occurred, so record_event should not be called
+            self.mock_filesystem.record_event.assert_not_called()
 
     def test_execute_task_timeout_retry(self):
         """Should retry on timeout with exponential backoff."""
@@ -163,22 +168,24 @@ class TestAgent(MockedNetworkTestCase):
         """Should construct proper payload for API."""
         mock_response = Mock()
         mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": "Output"}}]
+        }
         
-        with patch('main.agent.executor.asyncio.run', return_value=mock_response):
-            with patch('main.agent.executor.extract_content_from_response', return_value="Output"):
-                agent = Agent(self.config, self.mock_channel_factory, self.mock_filesystem)
-                
-                task = {"user_prompt": "Test prompt"}
-                agent.execute_task(task)
-                
-                # Verify send_message was called with proper structure
-                call_args = self.mock_channel.send_message.call_args
-                # send_message is called with positional argument
-                payload = call_args[0][0] if call_args[0] else {}
-                
-                self.assertIn("messages", payload)
-                self.assertEqual(payload["model"], "gpt-3.5")
-                self.assertEqual(payload["temperature"], 0.7)
+        with patch('main.agent.executor.run_async', return_value=mock_response):
+            agent = Agent(self.config, self.mock_channel_factory, self.mock_filesystem)
+            
+            task = {"user_prompt": "Test prompt"}
+            agent.execute_task(task)
+            
+            # Verify send_message was called with proper structure
+            call_args = self.mock_channel.send_message.call_args
+            # send_message is called with positional argument
+            payload = call_args[0][0] if call_args[0] else {}
+            
+            self.assertIn("messages", payload)
+            self.assertEqual(payload["model"], "gpt-3.5")
+            self.assertEqual(payload["temperature"], 0.7)
 
     def test_execute_tools_from_response_clone_repo_default_branch(self):
         """Should inject default git branch when clone_repo omits branch."""

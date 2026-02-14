@@ -7,7 +7,7 @@ Exports:
 - FileSystemError
 """
 
-from .fileio import (
+from .filesystem import (
     FileSystem,
     ReadOnlyFileSystem,
     FileSystemError,
