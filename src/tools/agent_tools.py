@@ -204,9 +204,9 @@ class AgentTools:
             path: File path (relative to working_dir)
             encoding: Text encoding (default: utf-8)
             offset: Starting byte position to read from (default: 0)
-                   Note: offset must align with character boundaries for multi-byte encodings
+                   For multi-byte encodings (e.g., UTF-8), misaligned offsets will raise UnicodeDecodeError
             length: Number of bytes to read (default: None, reads to end)
-                   Note: length is in bytes, not characters
+                   For multi-byte encodings, may include partial characters at boundaries
             
         Returns:
             File contents as string
