@@ -157,6 +157,25 @@ class TestDirectoryOperations(unittest.TestCase):
         self.assertIn("path", nested)
         self.assertEqual(nested["path"], "subdir1/nested")
 
+    def test_list_directory_skips_external_symlinks(self):
+        """Should skip symlinks that point outside working directory."""
+        # Create an external directory
+        external_dir = tempfile.mkdtemp()
+        try:
+            Path(os.path.join(external_dir, "external.txt")).touch()
+            
+            # Create a symlink inside working dir that points outside
+            os.symlink(external_dir, os.path.join(self.temp_dir, "external_link"))
+            
+            # List directory - should skip the external symlink
+            result = self.tools.list_directory(".")
+            
+            # The symlink should not appear in the results
+            self.assertNotIn("external_link", result["directories"])
+        finally:
+            import shutil
+            shutil.rmtree(external_dir)
+
 
 class TestFileReadWrite(unittest.TestCase):
     """Test file reading and writing operations."""

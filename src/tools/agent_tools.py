@@ -196,6 +196,14 @@ class AgentTools:
                 # Separate directories and files
                 for entry in entries:
                     full_path = os.path.join(current_path, entry)
+                    # Validate that the path (including symlinks) stays within working directory
+                    real_path = os.path.realpath(full_path)
+                    real_working = os.path.realpath(self.working_dir)
+                    if not real_path.startswith(real_working):
+                        # Skip entries that escape working directory
+                        logger.warning(f"Skipping path that escapes working directory: {entry}")
+                        continue
+                    
                     if os.path.isdir(full_path):
                         directories_list.append(entry)
                     else:
