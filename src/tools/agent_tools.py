@@ -204,7 +204,8 @@ class AgentTools:
             path: File path (relative to working_dir)
             encoding: Text encoding (default: utf-8)
             offset: Starting byte position to read from (default: 0)
-                   For multi-byte encodings (e.g., UTF-8), misaligned offsets will raise UnicodeDecodeError
+                   For multi-byte encodings (e.g., UTF-8), UnicodeDecodeError may occur if the
+                   specified byte range cannot be decoded as valid characters
             length: Number of bytes to read (default: None, reads to end)
                    For multi-byte encodings, may include partial characters at boundaries
             
@@ -214,7 +215,7 @@ class AgentTools:
         Raises:
             PathError: If path is invalid
             FileSizeError: If file exceeds max_file_size
-            ToolError: If read fails, offset is negative, or if offset/length cause decoding errors
+            ToolError: If read fails, offset is negative, or if the byte range causes decoding errors
         """
         try:
             # Validate offset
@@ -253,7 +254,7 @@ class AgentTools:
         except (PathError, FileSizeError):
             raise
         except UnicodeDecodeError as e:
-            raise ToolError(f"Failed to decode file {path}: {e}. Offset/length may not align with character boundaries.")
+            raise ToolError(f"Failed to decode file {path}: {e}. The byte range may not align with character boundaries.")
         except Exception as e:
             raise ToolError(f"Failed to read file {path}: {e}")
     
