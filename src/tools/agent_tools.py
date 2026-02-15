@@ -201,14 +201,10 @@ class AgentTools:
                     full_path = os.path.join(current_path, entry)
                     # Validate that the path (including symlinks) stays within working directory
                     real_path = os.path.realpath(full_path)
-                    try:
-                        # Use commonpath to properly validate path containment
-                        if os.path.commonpath([real_path, real_working]) != real_working:
-                            # Skip entries that escape working directory
-                            logger.warning(f"Skipping path that escapes working directory: {entry}")
-                            continue
-                    except ValueError:
-                        # Paths on different drives (Windows) - skip
+                    # Ensure path separator at the end for proper prefix matching
+                    real_working_sep = real_working + os.sep if not real_working.endswith(os.sep) else real_working
+                    if not real_path.startswith(real_working_sep) and real_path != real_working:
+                        # Skip entries that escape working directory
                         logger.warning(f"Skipping path that escapes working directory: {entry}")
                         continue
                     
@@ -1560,7 +1556,7 @@ File Writing:
     - edit_file(path: str, diff: str) -> dict: Apply unified diff to file
 
 Directory Operations:
-  - list_directory(path: str) -> dict: List immediate contents (non-recursive)
+  - list_directory(path: str) -> dict: List directory tree recursively
   - list_all_files(path: str, extensions: list = None) -> dict: Recursively list files with optional extension filter
 
 Search:

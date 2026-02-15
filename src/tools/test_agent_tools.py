@@ -174,7 +174,6 @@ class TestDirectoryOperations(unittest.TestCase):
             # The symlink should not appear in the results
             self.assertNotIn("external_link", result["directories"])
         finally:
-            import shutil
             shutil.rmtree(external_dir)
 
 
