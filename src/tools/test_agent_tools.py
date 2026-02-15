@@ -167,6 +167,115 @@ class TestFileReadWrite(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.temp_dir, "nested", "dir", "file.txt")))
 
 
+class TestFileReadPagination(unittest.TestCase):
+    """Test file reading with pagination support."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.tools = AgentTools(working_dir=self.temp_dir)
+
+    def tearDown(self):
+        """Clean up."""
+        import shutil
+        shutil.rmtree(self.temp_dir)
+
+    def test_read_file_with_offset_and_length(self):
+        """Should read a chunk from the middle of a file."""
+        content = "0123456789ABCDEFGHIJ"
+        self.tools.write_file("test.txt", content)
+        
+        # Read 5 bytes starting from offset 5
+        chunk = self.tools.read_file("test.txt", offset=5, length=5)
+        
+        self.assertEqual(chunk, "56789")
+
+    def test_read_file_with_offset_only(self):
+        """Should read from offset to end of file."""
+        content = "0123456789ABCDEFGHIJ"
+        self.tools.write_file("test.txt", content)
+        
+        # Read from offset 10 to end
+        chunk = self.tools.read_file("test.txt", offset=10)
+        
+        self.assertEqual(chunk, "ABCDEFGHIJ")
+
+    def test_read_file_paginated_full_read(self):
+        """Should perform a full paginated read over a large file."""
+        # Create a large file with predictable content (10KB+)
+        lines = []
+        for i in range(1, 501):  # 500 lines
+            lines.append(f"Line {i}\n")
+        original_content = "".join(lines)
+        
+        self.tools.write_file("large.txt", original_content)
+        
+        # Read in chunks of 1000 bytes
+        chunk_size = 1000
+        offset = 0
+        chunks = []
+        
+        while True:
+            chunk = self.tools.read_file("large.txt", offset=offset, length=chunk_size)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            offset += len(chunk.encode('utf-8'))
+        
+        # Verify all chunks concatenated equal the original
+        reconstructed = "".join(chunks)
+        self.assertEqual(reconstructed, original_content)
+        
+        # Verify we read multiple chunks
+        self.assertGreater(len(chunks), 1)
+
+    def test_read_file_pagination_at_boundaries(self):
+        """Should test reading at exact file boundaries."""
+        content = "0123456789"  # 10 bytes
+        self.tools.write_file("test.txt", content)
+        
+        # Read exactly to the end
+        chunk = self.tools.read_file("test.txt", offset=0, length=10)
+        self.assertEqual(chunk, content)
+        
+        # Read from exact end
+        chunk = self.tools.read_file("test.txt", offset=10)
+        self.assertEqual(chunk, "")
+
+    def test_read_file_invalid_offset(self):
+        """Should ensure negative offsets raise appropriate errors."""
+        self.tools.write_file("test.txt", "content")
+        
+        with self.assertRaises(ToolError) as context:
+            self.tools.read_file("test.txt", offset=-1)
+        
+        self.assertIn("non-negative", str(context.exception))
+
+    def test_read_file_offset_beyond_eof(self):
+        """Should test behavior when offset is beyond file size."""
+        content = "0123456789"
+        self.tools.write_file("test.txt", content)
+        
+        # Read from offset beyond file size
+        chunk = self.tools.read_file("test.txt", offset=100)
+        
+        # Should return empty string
+        self.assertEqual(chunk, "")
+
+    def test_read_file_maintains_size_limit(self):
+        """Should ensure the max_file_size check still applies with pagination."""
+        # Create tools with small limit
+        tools = AgentTools(working_dir=self.temp_dir, max_file_size=100)
+        
+        # Write large file
+        large_content = "x" * 1000
+        tools.write_file("large.txt", large_content)
+        
+        # Should fail to read even with pagination
+        with self.assertRaises(FileSizeError):
+            tools.read_file("large.txt", offset=0, length=50)
+
+
 class TestFileEditing(unittest.TestCase):
     """Test file editing operations."""
 

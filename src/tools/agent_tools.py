@@ -196,13 +196,15 @@ class AgentTools:
         except Exception as e:
             raise ToolError(f"Failed to list directory {path}: {e}")
     
-    def read_file(self, path: str, encoding: str = "utf-8") -> str:
+    def read_file(self, path: str, encoding: str = "utf-8", offset: int = 0, length: int = None) -> str:
         """
-        Read file contents.
+        Read file contents with optional pagination support.
         
         Args:
             path: File path (relative to working_dir)
             encoding: Text encoding (default: utf-8)
+            offset: Starting byte position to read from (default: 0)
+            length: Number of bytes to read (default: None, reads to end)
             
         Returns:
             File contents as string
@@ -210,9 +212,13 @@ class AgentTools:
         Raises:
             PathError: If path is invalid
             FileSizeError: If file exceeds max_file_size
-            ToolError: If read fails
+            ToolError: If read fails or offset is negative
         """
         try:
+            # Validate offset
+            if offset < 0:
+                raise ToolError(f"Offset must be non-negative, got: {offset}")
+            
             file_path = self._validate_path(path)
             
             if not os.path.isfile(file_path):
@@ -226,9 +232,17 @@ class AgentTools:
                 )
             
             with open(file_path, 'r', encoding=encoding) as f:
-                content = f.read()
+                # Seek to offset position
+                f.seek(offset)
+                # Read specified length or to end
+                content = f.read(length)
             
-            logger.debug(f"Read file: {path} ({file_size} bytes)")
+            # Log with pagination info if used
+            if offset > 0 or length is not None:
+                bytes_read = len(content.encode(encoding))
+                logger.debug(f"Read file: {path} (offset={offset}, length={length}, bytes_read={bytes_read}, total_size={file_size} bytes)")
+            else:
+                logger.debug(f"Read file: {path} ({file_size} bytes)")
             return content
         
         except (PathError, FileSizeError):
