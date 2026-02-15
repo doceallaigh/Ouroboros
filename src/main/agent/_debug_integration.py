@@ -15,7 +15,7 @@ config = {
     'model': 'qwen/qwen3-coder-30b',
     'temperature': 0.7,
     'max_tokens': 1000,
-    'allowed_tools': ['read_file', 'write_file', 'append_file', 'list_directory', 'confirm_task_complete'],
+    'allowed_tools': ['read_file', 'write_file', 'list_directory', 'confirm_task_complete'],
     'model_endpoints': [{'model': 'qwen/qwen3-coder-30b', 'endpoint': 'http://localhost:12345/v1/chat/completions'}]
 }
 

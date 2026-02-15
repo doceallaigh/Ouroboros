@@ -139,7 +139,6 @@ def _format_function_call(func_name: str, arguments: dict) -> str:
         "assign_tasks": ["assignments"],
         "write_file": ["path", "content"],
         "read_file": ["path"],
-        "append_file": ["path", "content"],
         "edit_file": ["path", "diff"],
         "list_directory": ["path", "depth"],
         "list_all_files": ["path", "extensions"],

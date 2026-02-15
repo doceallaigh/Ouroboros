@@ -71,7 +71,6 @@ class AgentTools:
         "list_directory",
         "read_file",
         "write_file",
-        "append_file",
         "edit_file",
         "search_files",
         "get_file_info",
@@ -323,56 +322,6 @@ class AgentTools:
             raise
         except Exception as e:
             raise ToolError(f"Failed to write file {path}: {e}")
-    
-    def append_file(self, path: str, content: str, encoding: str = "utf-8") -> Dict[str, Any]:
-        """
-        Append content to a file.
-        
-        Creates the file if it doesn't exist.
-        
-        Args:
-            path: File path (relative to working_dir)
-            content: Content to append
-            encoding: Text encoding (default: utf-8)
-            
-        Returns:
-            Dictionary with path, size, and lines added
-            
-        Raises:
-            PathError: If path is invalid
-            ToolError: If append fails
-        """
-        try:
-            file_path = self._validate_path(path)
-            
-            # Ensure parent directory exists
-            parent_dir = os.path.dirname(file_path)
-            os.makedirs(parent_dir, exist_ok=True)
-            
-            # Count lines being appended
-            lines_added = content.count('\n')
-            if content and not content.endswith('\n'):
-                lines_added += 1
-            
-            # Append to file
-            with open(file_path, 'a', encoding=encoding) as f:
-                f.write(content)
-            
-            file_size = os.path.getsize(file_path)
-            
-            logger.info(f"Appended to file: {path} ({lines_added} lines, total size: {file_size})")
-            
-            return {
-                "path": path,
-                "size": file_size,
-                "lines_added": lines_added,
-                "encoding": encoding,
-            }
-        
-        except PathError:
-            raise
-        except Exception as e:
-            raise ToolError(f"Failed to append to file {path}: {e}")
     
     def edit_file(self, path: str, diff: str, encoding: str = "utf-8") -> Dict[str, Any]:
         """
@@ -1424,7 +1373,7 @@ class AgentTools:
         
         RESTRICTION: Can only audit files that have been produced during this task execution.
         Audit requests must come AFTER the files have been created/modified with write_file,
-        append_file, or edit_file calls.
+        or edit_file calls.
         
         Args:
             file_paths: List of relative file paths to audit
@@ -1449,7 +1398,7 @@ class AgentTools:
         # Validate that audit_files only references files that were produced
         unproduced_files = [f for f in file_paths if f not in produced_files]
         if unproduced_files:
-            error_msg = f"Cannot audit files that haven't been produced: {unproduced_files}. Only audit files you created/modified with write_file, append_file, or edit_file."
+            error_msg = f"Cannot audit files that haven't been produced: {unproduced_files}. Only audit files you created/modified with write_file or edit_file."
             logger.error(error_msg)
             raise ToolError(error_msg)
         
@@ -1508,8 +1457,7 @@ File Reading:
 
 File Writing:
   - write_file(path: str, content: str) -> dict: Create or overwrite file (auto-creates directories)
-  - append_file(path: str, content: str) -> dict: Append to file or create if missing
-    - edit_file(path: str, diff: str) -> dict: Apply unified diff to file
+  - edit_file(path: str, diff: str) -> dict: Apply unified diff to file
 
 Directory Operations:
   - list_directory(path: str, depth: int = -1) -> dict: List directory tree recursively (depth=-1 unlimited, 0 immediate only)

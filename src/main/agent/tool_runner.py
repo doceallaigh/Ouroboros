@@ -79,7 +79,6 @@ class ToolEnvironment:
         CORE_TOOLS = {
             "read_file":      (tools.read_file,      False),
             "write_file":     (tools.write_file,     False),
-            "append_file":    (tools.append_file,    False),
             "edit_file":      (tools.edit_file,      False),
             "list_directory": (tools.list_directory, True),
             "list_all_files": (tools.list_all_files, True),
@@ -88,7 +87,7 @@ class ToolEnvironment:
             "delete_file":    (tools.delete_file,    False),
         }
 
-        WRITE_TOOLS = {"write_file", "append_file", "edit_file"}
+        WRITE_TOOLS = {"write_file", "edit_file"}
 
         for name, (func, supports_page) in CORE_TOOLS.items():
             track_file = is_developer and name in WRITE_TOOLS

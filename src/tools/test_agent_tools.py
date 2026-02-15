@@ -214,23 +214,6 @@ class TestFileEditing(unittest.TestCase):
         import shutil
         shutil.rmtree(self.temp_dir)
 
-    def test_append_file_creates_new(self):
-        """Should create file if it doesn't exist."""
-        result = self.tools.append_file("test.txt", "First line\n")
-        
-        self.assertEqual(result["lines_added"], 1)
-        self.assertTrue(os.path.exists(os.path.join(self.temp_dir, "test.txt")))
-
-    def test_append_file_adds_content(self):
-        """Should append content to existing file."""
-        self.tools.write_file("test.txt", "Line 1\n")
-        result = self.tools.append_file("test.txt", "Line 2\n")
-        
-        self.assertEqual(result["lines_added"], 1)
-        
-        result = self.tools.read_file("test.txt")
-        self.assertEqual(result["content"], "Line 1\nLine 2\n")
-
     def test_edit_file_replaces_text(self):
         """Should replace text in file."""
         self.tools.write_file("test.txt", "Hello world\n")

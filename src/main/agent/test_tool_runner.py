@@ -25,7 +25,7 @@ class TestToolEnvironment(unittest.TestCase):
         self.mock_agent.config = {
             "role": "developer",
             "allowed_tools": [
-                "read_file", "write_file", "append_file", "edit_file",
+                "read_file", "write_file", "edit_file",
                 "list_directory", "list_all_files", "search_files",
                 "get_file_info", "delete_file", "confirm_task_complete",
                 "audit_files",
@@ -52,7 +52,7 @@ class TestToolEnvironment(unittest.TestCase):
         """All standard file tools should be present as callables."""
         env = self._make_env()
         bindings = env.get_bindings()
-        for name in ["read_file", "write_file", "append_file", "edit_file",
+        for name in ["read_file", "write_file", "edit_file",
                       "list_directory", "list_all_files", "search_files",
                       "get_file_info", "delete_file"]:
             self.assertIn(name, bindings, f"Missing binding: {name}")
@@ -117,16 +117,6 @@ class TestToolEnvironment(unittest.TestCase):
         env = self._make_env()
         bindings = env.get_bindings()
         bindings["write_file"]("test.txt", "content")
-        self.assertIn("test.txt", env.files_produced)
-
-    def test_append_file_tracked(self):
-        """append_file() calls should be tracked in files_produced."""
-        env = self._make_env()
-        bindings = env.get_bindings()
-        # First create the file so append works
-        bindings["write_file"]("test.txt", "line1\n")
-        env.files_produced.clear()
-        bindings["append_file"]("test.txt", "line2\n")
         self.assertIn("test.txt", env.files_produced)
 
     def test_edit_file_tracked(self):
@@ -225,7 +215,7 @@ class TestExecuteToolsFromResponse(unittest.TestCase):
             "role": "developer",
             "allowed_tools": [
                 "read_file", "write_file", "confirm_task_complete",
-                "list_directory", "append_file", "edit_file",
+                "list_directory", "edit_file",
                 "list_all_files", "search_files", "get_file_info",
                 "delete_file", "audit_files",
             ],

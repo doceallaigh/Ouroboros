@@ -110,27 +110,6 @@ TOOL_DEFINITIONS = {
             }
         }
     },
-    "append_file": {
-        "type": "function",
-        "function": {
-            "name": "append_file",
-            "description": "Append content to the end of a file",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "File path relative to working directory"
-                    },
-                    "content": {
-                        "type": "string",
-                        "description": "Content to append"
-                    }
-                },
-                "required": ["path", "content"]
-            }
-        }
-    },
     "edit_file": {
         "type": "function",
         "function": {

@@ -205,7 +205,6 @@ clone_repo('https://example.com/repo.git')
         for name in [
             "read_file",
             "write_file",
-            "append_file",
             "edit_file",
             "list_directory",
             "list_all_files",
@@ -245,7 +244,6 @@ clone_repo('https://example.com/repo.git', branch='dev')
         for name in [
             "read_file",
             "write_file",
-            "append_file",
             "edit_file",
             "list_directory",
             "list_all_files",
