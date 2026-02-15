@@ -93,13 +93,17 @@ TOOL_DEFINITIONS = {
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "Read the contents of a file",
+            "description": "Read the contents of a file. Large files are paginated; use the page parameter to read subsequent pages.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
                         "description": "File path relative to working directory"
+                    },
+                    "page": {
+                        "type": "integer",
+                        "description": "Page number to read (1-based, default 1). Each page contains 500 lines."
                     }
                 },
                 "required": ["path"]

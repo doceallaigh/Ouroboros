@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 # Configuration constants
 DEFAULT_MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+DEFAULT_PAGE_LINES = 500
 DEFAULT_MAX_SEARCH_RESULTS = 100
 DEFAULT_WORKING_DIR = os.getcwd()
 ALLOWED_PACKAGE_PREFIXES = []  # Empty = allow all (can be restricted)
@@ -196,20 +197,26 @@ class AgentTools:
         except Exception as e:
             raise ToolError(f"Failed to list directory {path}: {e}")
     
-    def read_file(self, path: str, encoding: str = "utf-8") -> str:
+    def read_file(self, path: str, page: int = 1, encoding: str = "utf-8", page_size: int = DEFAULT_PAGE_LINES) -> Dict[str, Any]:
         """
-        Read file contents.
+        Read file contents with pagination.
         
         Args:
             path: File path (relative to working_dir)
+            page: Page number to read (1-based, default: 1)
             encoding: Text encoding (default: utf-8)
+            page_size: Lines per page (default: DEFAULT_PAGE_LINES)
             
         Returns:
-            File contents as string
+            Dict with keys:
+              - content: The text for the requested page
+              - page: Current page number
+              - total_pages: Total number of pages
+              - total_lines: Total line count of the file
+              - path: The file path requested
             
         Raises:
             PathError: If path is invalid
-            FileSizeError: If file exceeds max_file_size
             ToolError: If read fails
         """
         try:
@@ -218,20 +225,32 @@ class AgentTools:
             if not os.path.isfile(file_path):
                 raise ToolError(f"Not a file: {path}")
             
-            # Check file size
-            file_size = os.path.getsize(file_path)
-            if file_size > self.max_file_size:
-                raise FileSizeError(
-                    f"File too large: {file_size} bytes (limit: {self.max_file_size})"
-                )
-            
             with open(file_path, 'r', encoding=encoding) as f:
-                content = f.read()
+                lines = f.readlines()
             
-            logger.debug(f"Read file: {path} ({file_size} bytes)")
-            return content
+            total_lines = len(lines)
+            total_pages = max(1, (total_lines + page_size - 1) // page_size)
+            safe_page = max(1, min(page, total_pages))
+            start = (safe_page - 1) * page_size
+            end = start + page_size
+            content = "".join(lines[start:end])
+            
+            # Remove trailing newline added by join for consistency
+            if content.endswith("\n") and total_lines > 0 and not lines[-1].endswith("\n") and end >= total_lines:
+                pass  # keep as-is; file didn't end with newline originally only on last page
+            
+            file_size = os.path.getsize(file_path)
+            logger.debug(f"Read file: {path} (page {safe_page}/{total_pages}, {file_size} bytes total)")
+            
+            return {
+                "content": content,
+                "page": safe_page,
+                "total_pages": total_pages,
+                "total_lines": total_lines,
+                "path": path,
+            }
         
-        except (PathError, FileSizeError):
+        except PathError:
             raise
         except Exception as e:
             raise ToolError(f"Failed to read file {path}: {e}")

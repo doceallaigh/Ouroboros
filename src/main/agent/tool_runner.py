@@ -77,7 +77,7 @@ class ToolEnvironment:
 
         # ---- Core file tools (always wrapped for output capture) -----------
         CORE_TOOLS = {
-            "read_file":      (tools.read_file,      True),
+            "read_file":      (tools.read_file,      False),
             "write_file":     (tools.write_file,     False),
             "append_file":    (tools.append_file,    False),
             "edit_file":      (tools.edit_file,      False),
