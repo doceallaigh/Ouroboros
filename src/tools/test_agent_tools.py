@@ -19,6 +19,7 @@ from tools import (
     PathError,
     FileSizeError,
     PackageError,
+    GitError,
     get_tools,
 )
 

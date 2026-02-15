@@ -15,6 +15,12 @@ from main.agent.tool_definitions import get_tools_for_role
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Defaults
+# ---------------------------------------------------------------------------
+_DEFAULT_MODEL = "qwen/qwen2-7b"
+_DEFAULT_ENDPOINT = "http://localhost:12345/v1/chat/completions"
+
 # Persistent event loop for async operations
 _event_loop: asyncio.AbstractEventLoop = None
 
@@ -199,6 +205,105 @@ def _format_value(value: Any) -> str:
         return str(value)
 
 
+# ---------------------------------------------------------------------------
+# Shared utilities – used by both execute_task and agentic_loop
+# ---------------------------------------------------------------------------
+
+def parse_model_endpoints(config: dict) -> list:
+    """
+    Parse ``model_endpoints`` from an agent config dict.
+
+    Supports both the current ``model_endpoints`` list-of-dicts format and
+    the legacy ``model`` / ``endpoint`` string-or-list format.
+
+    Returns:
+        Non-empty list of ``{"model": ..., "endpoint": ...}`` dicts.
+    """
+    endpoints = config.get("model_endpoints", [])
+    if endpoints:
+        return endpoints
+
+    # Legacy: separate model / endpoint keys (string or list)
+    model = config.get("model", _DEFAULT_MODEL)
+    endpoint = config.get("endpoint", _DEFAULT_ENDPOINT)
+    if isinstance(model, str):
+        model = [model]
+    if isinstance(endpoint, str):
+        endpoint = [endpoint]
+    if not model:
+        model = [_DEFAULT_MODEL]
+    if not endpoint:
+        endpoint = [_DEFAULT_ENDPOINT]
+    endpoints = [{"model": m, "endpoint": e} for m, e in zip(model, endpoint)]
+
+    return endpoints or [{"model": _DEFAULT_MODEL, "endpoint": _DEFAULT_ENDPOINT}]
+
+
+def send_llm_request(agent, payload: dict, selected_endpoint: str) -> dict:
+    """
+    Execute a single LLM request cycle: send → receive → extract → record.
+
+    This is deliberately *one attempt* – callers manage their own retry loops
+    so they can attach domain-specific behaviour (event-sourcing, timeout
+    recording, force-text flags, etc.).
+
+    Raises whatever ``run_async`` / ``receive_message`` raises (typically
+    ``APIError``).
+
+    Returns:
+        ``{"response": str, "message": dict}``
+    """
+    import datetime as _dt
+
+    # Point the channel at the right endpoint for this attempt
+    agent.channel.config["endpoint"] = selected_endpoint
+
+    # --- send ---
+    ticks = agent.channel.send_message(payload)
+
+    # Record the outgoing query
+    try:
+        agent.filesystem.create_query_file(
+            agent.name, ticks, _dt.datetime.now().isoformat(), payload,
+        )
+    except Exception:
+        logger.exception("Failed to create query file")
+
+    # --- receive ---
+    resp_result = run_async(agent.channel.receive_message())
+    if isinstance(resp_result, tuple):
+        response, returned_ticks = resp_result
+    else:
+        response = resp_result
+        returned_ticks = getattr(agent.channel, "last_ticks", None)
+    if returned_ticks is None:
+        returned_ticks = ticks
+
+    # --- extract content / tool-calls ---
+    message = extract_full_response(response)
+
+    if message.get("tool_calls"):
+        result = _convert_tool_calls_to_text(
+            message["tool_calls"], message.get("content", ""),
+        )
+    elif "content" in message:
+        result = message["content"]
+    else:
+        result = extract_content_from_response(response, agent.post_processor)
+
+    # --- record the response ---
+    try:
+        raw = json.dumps(message, indent=2) if isinstance(message, dict) else str(message)
+        agent.filesystem.append_response_file(
+            agent.name, returned_ticks, _dt.datetime.now().isoformat(),
+            f"RAW_MESSAGE:\n{raw}\n\nPARSED_RESULT:\n{result}",
+        )
+    except Exception:
+        logger.exception("Failed to append response to query file")
+
+    return {"response": result, "message": message}
+
+
 def execute_task(agent, task: Dict[str, Any]) -> str:
     """
     Execute a task using the agent with retry logic for timeouts.
@@ -218,141 +323,54 @@ def execute_task(agent, task: Dict[str, Any]) -> str:
     from main.exceptions import OrganizationError
     
     base_timeout = agent.config.get("timeout", 120)
+    model_endpoints = parse_model_endpoints(agent.config)
     
-    # Parse model_endpoints configuration (supports both old and new formats)
-    model_endpoints = agent.config.get("model_endpoints", [])
-    if not model_endpoints:
-        # Fallback to old separate model/endpoint format for backward compatibility
-        model = agent.config.get("model", "qwen/qwen2-7b")
-        endpoint = agent.config.get("endpoint", "http://localhost:12345/v1/chat/completions")
-        if isinstance(model, str):
-            model = [model]
-        if isinstance(endpoint, str):
-            endpoint = [endpoint]
-        if not model:
-            model = ["qwen/qwen2-7b"]
-        if not endpoint:
-            endpoint = ["http://localhost:12345/v1/chat/completions"]
-        # Convert old format to model_endpoints
-        model_endpoints = [{"model": m, "endpoint": e} for m, e in zip(model, endpoint)]
+    # Build the message payload (single-shot: system + user)
+    payload = {
+        "messages": [
+            {"role": "system", "content": agent.config.get("system_prompt", "")},
+            {"role": "user", "content": task.get("user_prompt", "")},
+        ],
+        "model": model_endpoints[0]["model"],
+        "temperature": float(agent.config.get("temperature", 0.7)),
+        "max_tokens": int(agent.config.get("max_tokens", -1)),
+    }
     
-    if not model_endpoints:
-        model_endpoints = [{"model": "qwen/qwen2-7b", "endpoint": "http://localhost:12345/v1/chat/completions"}]
+    # Add tool definitions if this agent has allowed_tools
+    allowed_tools = agent.config.get("allowed_tools", [])
+    if allowed_tools:
+        tools = get_tools_for_role(allowed_tools)
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
     
     backoff_delay = 1.0
     last_error = None
-    ticks = None
-    response_recorded = False  # Flag to ensure we only record response once
     
     for attempt in range(agent.MAX_RETRIES):
         try:
-            # Increase timeout with each retry
             current_timeout = base_timeout * (agent.INITIAL_TIMEOUT_MULTIPLIER ** attempt)
             
-            # Select model/endpoint pair for this attempt (failover to next pair on retry)
+            # Select endpoint pair for this attempt (failover)
             pair_index = min(attempt, len(model_endpoints) - 1)
             selected_pair = model_endpoints[pair_index]
-            selected_model = selected_pair["model"]
-            selected_endpoint = selected_pair["endpoint"]
-
-            # Build the message payload
-            payload = {
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": agent.config.get("system_prompt", "")
-                    },
-                    {
-                        "role": "user",
-                        "content": task.get("user_prompt", "")
-                    }
-                ],
-                "model": selected_model,
-                "temperature": float(agent.config.get("temperature", 0.7)),
-                "max_tokens": int(agent.config.get("max_tokens", -1)),
-            }
-            
-            # Add tool definitions if this agent has allowed_tools
-            allowed_tools = agent.config.get("allowed_tools", [])
-            if allowed_tools:
-                tools = get_tools_for_role(allowed_tools)
-                if tools:
-                    payload["tools"] = tools
-                    # Use auto mode for tool choice to let the model decide
-                    payload["tool_choice"] = "auto"
-            
-            # Update endpoint per attempt for failover
-            agent.channel.config["endpoint"] = selected_endpoint
+            payload["model"] = selected_pair["model"]
 
             logger.debug(
                 f"Agent {agent.name} executing task (attempt {attempt + 1}/{agent.MAX_RETRIES}, "
-                f"timeout={current_timeout}s, model={selected_model}, endpoint={selected_endpoint})"
+                f"timeout={current_timeout}s, model={selected_pair['model']}, "
+                f"endpoint={selected_pair['endpoint']})"
             )
             
-            # Send message and get ticks id for this query (generate on first attempt only)
-            if ticks is None:
-                ticks = agent.channel.send_message(payload)
-            else:
-                # On retry, send with same ticks but don't overwrite it
-                agent.channel.send_message(payload)
-
-            # Record query file with timestamp and payload (only on first attempt)
-            if attempt == 0:
-                query_ts = __import__("datetime").datetime.now().isoformat()
-                try:
-                    agent.filesystem.create_query_file(agent.name, ticks, query_ts, payload)
-                except Exception:
-                    logger.exception("Failed to create query file")
-
-            # Receive response (channel may return response or set channel.last_ticks)
-            resp_result = run_async(agent.channel.receive_message())
-            if isinstance(resp_result, tuple):
-                response, returned_ticks = resp_result
-            else:
-                response = resp_result
-                returned_ticks = getattr(agent.channel, 'last_ticks', None)
-            if returned_ticks is None:
-                returned_ticks = ticks
-
-            # Extract full response including tool_calls if present
-            message = extract_full_response(response)
-            
-            # Check if we have structured tool calls
-            if "tool_calls" in message and message["tool_calls"]:
-                # Convert tool_calls to function call format for parsing
-                result = _convert_tool_calls_to_text(message["tool_calls"], message.get("content", ""))
-            else:
-                # Fall back to extracting just the content
-                if "content" in message:
-                    result = message["content"]
-                else:
-                    result = extract_content_from_response(response, agent.post_processor)
-
-            # Append response timestamp and content to the per-query file (only once)
-            if not response_recorded:
-                resp_ts = __import__("datetime").datetime.now().isoformat()
-                try:
-                    # Log the raw JSON message (includes tool_calls when present)
-                    raw_response_str = json.dumps(message, indent=2) if isinstance(message, dict) else str(message)
-                    agent.filesystem.append_response_file(
-                        agent.name, returned_ticks, resp_ts, 
-                        f"RAW_MESSAGE:\n{raw_response_str}\n\nPARSED_RESULT:\n{result}"
-                    )
-                    response_recorded = True
-                except Exception:
-                    logger.exception("Failed to append response to query file")
-
-            # (Removed write_data; replay now uses per-query files in order)
+            bundle = send_llm_request(agent, payload, selected_pair["endpoint"])
             
             logger.info(f"Agent {agent.name} completed task")
-            return result
+            return bundle["response"]
             
         except APIError as e:
-            # Check if it's a timeout error
             if "timed out" in str(e).lower():
                 last_error = e
                 if attempt < agent.MAX_RETRIES - 1:
-                    # Record timeout retry event
                     agent.filesystem.record_event(
                         agent.filesystem.EVENT_TIMEOUT_RETRY,
                         {
@@ -362,7 +380,6 @@ def execute_task(agent, task: Dict[str, Any]) -> str:
                             "next_timeout_seconds": base_timeout * (agent.INITIAL_TIMEOUT_MULTIPLIER ** (attempt + 1)),
                         }
                     )
-                    
                     logger.warning(
                         f"Agent {agent.name} timeout (attempt {attempt + 1}/{agent.MAX_RETRIES}), "
                         f"retrying in {backoff_delay}s with increased timeout"
@@ -375,7 +392,6 @@ def execute_task(agent, task: Dict[str, Any]) -> str:
                     logger.error(error_msg)
                     raise OrganizationError(error_msg)
             else:
-                # Non-timeout API error, don't retry
                 error_msg = f"Agent {agent.name} task execution failed: {str(e)}"
                 logger.error(error_msg)
                 raise OrganizationError(error_msg)
@@ -385,7 +401,6 @@ def execute_task(agent, task: Dict[str, Any]) -> str:
             logger.error(error_msg)
             raise OrganizationError(error_msg)
     
-    # Should not reach here, but handle just in case
     error_msg = f"Agent {agent.name} task execution failed after {agent.MAX_RETRIES} retries: {str(last_error)}"
     logger.error(error_msg)
     raise OrganizationError(error_msg)

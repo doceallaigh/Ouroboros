@@ -54,6 +54,11 @@ class PackageError(ToolError):
     pass
 
 
+class GitError(ToolError):
+    """Raised when git operations fail."""
+    pass
+
+
 class AgentTools:
     """
     Provides agents with safe file system tools.
@@ -77,6 +82,11 @@ class AgentTools:
         "list_installed_packages",
         "confirm_task_complete",
         "audit_files",
+        "run_python",
+        "clone_repo",
+        "checkout_branch",
+        "push_branch",
+        "create_pull_request",
     }
     
     def __init__(self, working_dir: str = DEFAULT_WORKING_DIR, max_file_size: int = DEFAULT_MAX_FILE_SIZE, allowed_tools: Optional[List[str]] = None):
@@ -1089,6 +1099,255 @@ class AgentTools:
         
         return True
     
+    # ------------------------------------------------------------------
+    # Code execution
+    # ------------------------------------------------------------------
+
+    def run_python(self, code: str, timeout: int = 30, log_path: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Execute Python code in a subprocess and return the result.
+
+        Delegates to :class:`tools.code_runner.CodeRunner`.
+
+        Args:
+            code: Python source code to execute
+            timeout: Maximum execution time in seconds (default: 30)
+            log_path: Optional path (relative to working_dir) to write stdout/stderr
+
+        Returns:
+            Dict with stdout, stderr, exit_code, timed_out, duration_ms, success, log_path
+
+        Raises:
+            PathError: If log_path escapes working directory
+            ToolError: If execution setup fails
+        """
+        from tools.code_runner import CodeRunner
+
+        abs_log = None
+        if log_path:
+            abs_log = self._validate_path(log_path)
+
+        runner = CodeRunner()
+        result = runner.run_python(
+            code, cwd=self.working_dir, timeout=timeout, log_path=abs_log,
+        )
+        result["success"] = result.get("exit_code") == 0
+        return result
+
+    # ------------------------------------------------------------------
+    # Git operations
+    # ------------------------------------------------------------------
+
+    def clone_repo(
+        self,
+        repo_url: str,
+        dest_dir: Optional[str] = None,
+        branch: Optional[str] = None,
+        depth: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Clone a git repository into the working directory.
+
+        Args:
+            repo_url: HTTPS or SSH URL of the repository
+            dest_dir: Destination directory name (default: derived from URL)
+            branch: Branch to checkout after cloning
+            depth: Shallow clone depth (must be >= 1)
+
+        Returns:
+            Dict with success flag and cloned path
+
+        Raises:
+            ToolError: If clone fails or destination is non-empty
+        """
+        if depth is not None and depth < 1:
+            raise ToolError(f"Depth must be >= 1, got {depth}")
+
+        if dest_dir is None:
+            # Derive directory name from repo URL
+            dest_dir = repo_url.rstrip("/").rsplit("/", 1)[-1]
+            if dest_dir.endswith(".git"):
+                dest_dir = dest_dir[:-4]
+
+        abs_dest = self._validate_path(dest_dir)
+
+        # Reject non-empty destination
+        if os.path.isdir(abs_dest) and os.listdir(abs_dest):
+            raise ToolError(f"Destination directory is not empty: {dest_dir}")
+
+        cmd = ["git", "clone"]
+        if branch:
+            cmd += ["--branch", branch, "--single-branch"]
+        if depth is not None:
+            cmd += ["--depth", str(depth)]
+        cmd += [repo_url, abs_dest]
+
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=120)
+        except subprocess.CalledProcessError as exc:
+            raise ToolError(f"git clone failed: {exc.stderr.strip()}")
+        except subprocess.TimeoutExpired:
+            raise ToolError("git clone timed out after 120s")
+
+        return {"success": True, "path": dest_dir}
+
+    def checkout_branch(
+        self,
+        repo_dir: str,
+        branch_name: str,
+        create: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Checkout (or create) a branch in a local git repository.
+
+        Args:
+            repo_dir: Repository directory (relative to working_dir)
+            branch_name: Branch name
+            create: If True (default) creates the branch with ``-b``
+
+        Returns:
+            Dict with success, branch_name, created
+
+        Raises:
+            ToolError: Invalid branch name or repo dir
+            GitError: Not a git repository
+        """
+        # Validate branch name
+        if not re.match(r'^[\w\-/\.]+$', branch_name):
+            raise ToolError(f"Invalid branch name: {branch_name}")
+
+        abs_repo = self._validate_path(repo_dir)
+        if not os.path.isdir(abs_repo):
+            raise ToolError(f"Repository directory not found: {repo_dir}")
+        if not os.path.isdir(os.path.join(abs_repo, ".git")):
+            raise GitError(f"Not a git repository: {repo_dir}")
+
+        cmd = ["git", "checkout"]
+        if create:
+            cmd.append("-b")
+        cmd.append(branch_name)
+
+        try:
+            subprocess.run(cmd, cwd=abs_repo, check=True, capture_output=True, text=True, timeout=30)
+        except subprocess.CalledProcessError as exc:
+            raise GitError(f"git checkout failed: {exc.stderr.strip()}")
+
+        return {"success": True, "branch_name": branch_name, "created": create}
+
+    def push_branch(
+        self,
+        repo_dir: str,
+        branch_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Push the current (or specified) branch to its remote.
+
+        Args:
+            repo_dir: Repository directory (relative to working_dir)
+            branch_name: Branch to push (default: current branch)
+
+        Returns:
+            Dict with success, branch_name, remote
+
+        Raises:
+            GitError: No remote configured or push fails
+        """
+        abs_repo = self._validate_path(repo_dir)
+        if not os.path.isdir(os.path.join(abs_repo, ".git")):
+            raise GitError(f"Not a git repository: {repo_dir}")
+
+        if branch_name is None:
+            res = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=abs_repo, capture_output=True, text=True, timeout=10,
+            )
+            branch_name = res.stdout.strip()
+
+        # Discover remote
+        res = subprocess.run(
+            ["git", "remote"],
+            cwd=abs_repo, capture_output=True, text=True, timeout=10,
+        )
+        remote = res.stdout.strip().splitlines()[0] if res.stdout.strip() else ""
+        if not remote:
+            raise GitError("No remote configured for this repository")
+
+        try:
+            subprocess.run(
+                ["git", "push", "-u", remote, branch_name],
+                cwd=abs_repo, check=True, capture_output=True, text=True, timeout=120,
+            )
+        except subprocess.CalledProcessError as exc:
+            raise GitError(f"git push failed: {exc.stderr.strip()}")
+
+        return {"success": True, "branch_name": branch_name, "remote": remote}
+
+    def create_pull_request(
+        self,
+        repo_dir: str,
+        base_branch: Optional[str] = None,
+        title: Optional[str] = None,
+        body: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Create a pull request using the GitHub CLI (``gh``).
+
+        Args:
+            repo_dir: Repository directory (relative to working_dir)
+            base_branch: Base branch for the PR (default: repo default)
+            title: PR title (default: auto from branch)
+            body: PR body text
+
+        Returns:
+            Dict with success, pr_url, already_exists
+
+        Raises:
+            GitError: ``gh`` not found or PR creation fails
+        """
+        abs_repo = self._validate_path(repo_dir)
+        if not os.path.isdir(os.path.join(abs_repo, ".git")):
+            raise GitError(f"Not a git repository: {repo_dir}")
+
+        # Check gh availability
+        try:
+            subprocess.run(
+                ["gh", "--version"],
+                capture_output=True, text=True, timeout=10,
+            )
+        except FileNotFoundError:
+            raise GitError("GitHub CLI (gh) is not installed")
+
+        # Current branch
+        res = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=abs_repo, capture_output=True, text=True, timeout=10,
+        )
+        head_branch = res.stdout.strip()
+
+        cmd = ["gh", "pr", "create", "--head", head_branch]
+        if base_branch:
+            cmd += ["--base", base_branch]
+        if title:
+            cmd += ["--title", title]
+        if body:
+            cmd += ["--body", body]
+        if not title:
+            cmd += ["--fill"]
+
+        try:
+            result = subprocess.run(
+                cmd, cwd=abs_repo, capture_output=True, text=True, timeout=60,
+            )
+        except subprocess.CalledProcessError as exc:
+            raise GitError(f"gh pr create failed: {exc.stderr.strip()}")
+
+        if result.returncode != 0:
+            if "already exists" in result.stderr.lower():
+                return {"success": True, "already_exists": True, "pr_url": ""}
+            raise GitError(f"gh pr create failed: {result.stderr.strip()}")
+
+        return {"success": True, "pr_url": result.stdout.strip(), "already_exists": False}
+
     def confirm_task_complete(self, summary: str = "", deliverables: List[str] = None) -> Dict[str, Any]:
         """
         Confirm that the assigned task is complete.

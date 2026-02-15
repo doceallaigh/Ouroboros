@@ -9,7 +9,7 @@ import logging
 from typing import Dict, Any, List
 
 from comms import APIError, extract_content_from_response, extract_full_response
-from main.agent.executor import run_async, _convert_tool_calls_to_text
+from main.agent.executor import run_async, _convert_tool_calls_to_text, parse_model_endpoints, send_llm_request
 from main.agent.tool_definitions import get_tools_for_role
 
 logger = logging.getLogger(__name__)
@@ -364,93 +364,41 @@ def _execute_with_conversation_history(agent, conversation_history: List[Dict[st
     Returns:
         Dict with 'response' string and raw 'message' dict
     """
-    import asyncio
     import time
     from main.exceptions import OrganizationError
     
     base_timeout = agent.config.get("timeout", 120)
+    model_endpoints = parse_model_endpoints(agent.config)
     
-    # Parse model_endpoints configuration
-    model_endpoints = agent.config.get("model_endpoints", [])
-    if not model_endpoints:
-        model_endpoints = [{"model": "qwen/qwen2-7b", "endpoint": "http://localhost:12345/v1/chat/completions"}]
+    # Build payload with full conversation history
+    payload = {
+        "messages": conversation_history,
+        "model": model_endpoints[0]["model"],
+        "temperature": float(agent.config.get("temperature", 0.7)),
+        "max_tokens": int(agent.config.get("max_tokens", -1)),
+    }
+
+    # Add tool definitions if allowed
+    allowed_tools = tool_override if tool_override else agent.config.get("allowed_tools", [])
+    if allowed_tools:
+        tools = get_tools_for_role(allowed_tools)
+        if tools:
+            payload["tools"] = tools
+            if force_text_response:
+                payload["tool_choice"] = "none"
+                logger.info(f"Agent {agent.name} forced text response (tool_choice=none)")
+            else:
+                payload["tool_choice"] = "auto"
     
     backoff_delay = 1.0
     
     for attempt in range(agent.MAX_RETRIES):
         try:
-            current_timeout = base_timeout * (agent.INITIAL_TIMEOUT_MULTIPLIER ** attempt)
-            
             pair_index = min(attempt, len(model_endpoints) - 1)
             selected_pair = model_endpoints[pair_index]
-            selected_model = selected_pair["model"]
-            selected_endpoint = selected_pair["endpoint"]
+            payload["model"] = selected_pair["model"]
             
-            # Build payload with full conversation history
-            payload = {
-                "messages": conversation_history,
-                "model": selected_model,
-                "temperature": float(agent.config.get("temperature", 0.7)),
-                "max_tokens": int(agent.config.get("max_tokens", -1)),
-            }
-
-            # Add tool definitions if allowed
-            allowed_tools = tool_override if tool_override else agent.config.get("allowed_tools", [])
-            if allowed_tools:
-                tools = get_tools_for_role(allowed_tools)
-                if tools:
-                    payload["tools"] = tools
-                    if force_text_response:
-                        # Force text-only response (no tool calls)
-                        # Used after read-only operations to make the model process results
-                        payload["tool_choice"] = "none"
-                        logger.info(f"Agent {agent.name} forced text response (tool_choice=none)")
-                    else:
-                        payload["tool_choice"] = "auto"
-            
-            agent.channel.config["endpoint"] = selected_endpoint
-            
-            ticks = agent.channel.send_message(payload)
-
-            # Record query file for this iteration
-            query_ts = __import__("datetime").datetime.now().isoformat()
-            try:
-                agent.filesystem.create_query_file(agent.name, ticks, query_ts, payload)
-            except Exception:
-                logger.exception("Failed to create query file")
-            
-            resp_result = run_async(agent.channel.receive_message())
-            if isinstance(resp_result, tuple):
-                response, _ = resp_result
-            else:
-                response = resp_result
-            
-            # Extract full response including tool_calls if present
-            message = extract_full_response(response)
-
-            if "tool_calls" in message and message["tool_calls"]:
-                result = _convert_tool_calls_to_text(message["tool_calls"], message.get("content", ""))
-            else:
-                if "content" in message:
-                    result = message["content"]
-                else:
-                    result = extract_content_from_response(response, agent.post_processor)
-
-            # Append raw and parsed response to the per-query file
-            resp_ts = __import__("datetime").datetime.now().isoformat()
-            try:
-                raw_response_str = json.dumps(message, indent=2) if isinstance(message, dict) else str(message)
-                agent.filesystem.append_response_file(
-                    agent.name, ticks, resp_ts,
-                    f"RAW_MESSAGE:\n{raw_response_str}\n\nPARSED_RESULT:\n{result}"
-                )
-            except Exception:
-                logger.exception("Failed to append response to query file")
-
-            return {
-                "response": result,
-                "message": message,
-            }
+            return send_llm_request(agent, payload, selected_pair["endpoint"])
             
         except APIError as e:
             if "timed out" in str(e).lower() and attempt < agent.MAX_RETRIES - 1:
