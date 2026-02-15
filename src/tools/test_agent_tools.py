@@ -92,6 +92,68 @@ class TestDirectoryOperations(unittest.TestCase):
         with self.assertRaises(ToolError):
             self.tools.list_directory("nonexistent")
 
+    def test_list_directory_recursive(self):
+        """Should list directory contents recursively."""
+        # Create nested structure
+        os.makedirs(os.path.join(self.temp_dir, "subdir1", "nested1"))
+        os.makedirs(os.path.join(self.temp_dir, "subdir1", "nested2"))
+        Path(os.path.join(self.temp_dir, "subdir1", "nested.txt")).touch()
+        Path(os.path.join(self.temp_dir, "subdir1", "nested1", "deep.txt")).touch()
+        
+        result = self.tools.list_directory(".")
+        
+        # Check top level
+        self.assertEqual(result["total"], 4)
+        self.assertEqual(len(result["directories"]), 2)
+        self.assertEqual(len(result["files"]), 2)
+        self.assertIsInstance(result["directories"], dict)
+        
+        # Check that subdirectories are also dictionaries with tree structure
+        self.assertIn("subdir1", result["directories"])
+        subdir1 = result["directories"]["subdir1"]
+        self.assertIsInstance(subdir1, dict)
+        self.assertIn("directories", subdir1)
+        self.assertIn("files", subdir1)
+        
+        # Check nested subdirectories
+        self.assertEqual(len(subdir1["directories"]), 2)
+        self.assertIn("nested1", subdir1["directories"])
+        self.assertIn("nested2", subdir1["directories"])
+        self.assertEqual(len(subdir1["files"]), 1)
+        self.assertIn("nested.txt", subdir1["files"])
+        
+        # Check deeply nested directory
+        nested1 = subdir1["directories"]["nested1"]
+        self.assertEqual(len(nested1["files"]), 1)
+        self.assertIn("deep.txt", nested1["files"])
+
+    def test_list_directory_structure(self):
+        """Should return correct structure for each directory in tree."""
+        # Create simple nested structure
+        os.makedirs(os.path.join(self.temp_dir, "subdir1", "nested"))
+        Path(os.path.join(self.temp_dir, "subdir1", "file.txt")).touch()
+        
+        result = self.tools.list_directory(".")
+        
+        # Verify structure
+        self.assertIn("path", result)
+        self.assertIn("directories", result)
+        self.assertIn("files", result)
+        self.assertIn("total", result)
+        
+        # Verify nested structure
+        subdir1 = result["directories"]["subdir1"]
+        self.assertIn("path", subdir1)
+        self.assertIn("directories", subdir1)
+        self.assertIn("files", subdir1)
+        self.assertIn("total", subdir1)
+        self.assertEqual(subdir1["path"], "subdir1")
+        
+        # Verify deeply nested structure
+        nested = subdir1["directories"]["nested"]
+        self.assertIn("path", nested)
+        self.assertEqual(nested["path"], "subdir1/nested")
+
 
 class TestFileReadWrite(unittest.TestCase):
     """Test file reading and writing operations."""

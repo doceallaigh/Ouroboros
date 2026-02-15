@@ -152,13 +152,19 @@ class AgentTools:
     
     def list_directory(self, path: str = ".") -> Dict[str, Any]:
         """
-        List contents of a directory.
+        List contents of a directory recursively, returning the full directory tree.
         
         Args:
             path: Directory path (relative to working_dir)
             
         Returns:
-            Dictionary with directories, files, and total count
+            Dictionary with the full directory tree structure:
+            {
+                "path": str,              # Path of the directory
+                "directories": dict,      # Dictionary mapping directory names to their tree structures
+                "files": list,            # Sorted list of file names in this directory
+                "total": int             # Total count of immediate directories and files
+            }
             
         Raises:
             PathError: If path is invalid
@@ -170,26 +176,46 @@ class AgentTools:
             if not os.path.isdir(dir_path):
                 raise ToolError(f"Not a directory: {path}")
             
-            entries = os.listdir(dir_path)
+            # Build the tree recursively
+            def build_tree(current_path: str, relative_path: str) -> Dict[str, Any]:
+                """Recursively build directory tree."""
+                entries = os.listdir(current_path)
+                
+                directories_dict = {}
+                files = []
+                
+                for entry in entries:
+                    full_path = os.path.join(current_path, entry)
+                    if os.path.isdir(full_path):
+                        # Recursively build tree for subdirectory
+                        subdir_relative = os.path.join(relative_path, entry) if relative_path else entry
+                        directories_dict[entry] = build_tree(full_path, subdir_relative)
+                    else:
+                        files.append(entry)
+                
+                return {
+                    "path": relative_path if relative_path else ".",
+                    "directories": {k: directories_dict[k] for k in sorted(directories_dict.keys())},
+                    "files": sorted(files),
+                    "total": len(directories_dict) + len(files),
+                }
             
-            directories = []
-            files = []
+            result = build_tree(dir_path, path if path != "." else "")
             
-            for entry in entries:
-                full_path = os.path.join(dir_path, entry)
-                if os.path.isdir(full_path):
-                    directories.append(entry)
-                else:
-                    files.append(entry)
+            # Count total directories and files recursively for logging
+            def count_total(tree: Dict[str, Any]) -> tuple:
+                total_dirs = len(tree["directories"])
+                total_files = len(tree["files"])
+                for subdir_tree in tree["directories"].values():
+                    sub_dirs, sub_files = count_total(subdir_tree)
+                    total_dirs += sub_dirs
+                    total_files += sub_files
+                return total_dirs, total_files
             
-            logger.debug(f"Listed directory: {path} ({len(directories)} dirs, {len(files)} files)")
+            total_dirs, total_files = count_total(result)
+            logger.debug(f"Listed directory tree: {path} ({total_dirs} dirs, {total_files} files)")
             
-            return {
-                "path": path,
-                "directories": sorted(directories),
-                "files": sorted(files),
-                "total": len(directories) + len(files),
-            }
+            return result
         
         except PathError:
             raise
