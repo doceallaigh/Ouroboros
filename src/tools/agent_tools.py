@@ -204,7 +204,9 @@ class AgentTools:
             path: File path (relative to working_dir)
             encoding: Text encoding (default: utf-8)
             offset: Starting byte position to read from (default: 0)
+                   Note: offset must align with character boundaries for multi-byte encodings
             length: Number of bytes to read (default: None, reads to end)
+                   Note: length is in bytes, not characters
             
         Returns:
             File contents as string
@@ -212,7 +214,7 @@ class AgentTools:
         Raises:
             PathError: If path is invalid
             FileSizeError: If file exceeds max_file_size
-            ToolError: If read fails or offset is negative
+            ToolError: If read fails, offset is negative, or if offset/length cause decoding errors
         """
         try:
             # Validate offset
@@ -231,15 +233,18 @@ class AgentTools:
                     f"File too large: {file_size} bytes (limit: {self.max_file_size})"
                 )
             
-            with open(file_path, 'r', encoding=encoding) as f:
+            # Read in binary mode and decode to handle multi-byte encodings properly
+            with open(file_path, 'rb') as f:
                 # Seek to offset position
                 f.seek(offset)
                 # Read specified length or to end
-                content = f.read(length)
+                binary_content = f.read(length)
+                # Decode to string
+                content = binary_content.decode(encoding)
             
             # Log with pagination info if used
             if offset > 0 or length is not None:
-                bytes_read = len(content.encode(encoding))
+                bytes_read = len(binary_content)
                 logger.debug(f"Read file: {path} (offset={offset}, length={length}, bytes_read={bytes_read}, total_size={file_size} bytes)")
             else:
                 logger.debug(f"Read file: {path} ({file_size} bytes)")
@@ -247,6 +252,8 @@ class AgentTools:
         
         except (PathError, FileSizeError):
             raise
+        except UnicodeDecodeError as e:
+            raise ToolError(f"Failed to decode file {path}: {e}. Offset/length may not align with character boundaries.")
         except Exception as e:
             raise ToolError(f"Failed to read file {path}: {e}")
     

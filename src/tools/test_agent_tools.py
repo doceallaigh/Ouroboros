@@ -220,7 +220,8 @@ class TestFileReadPagination(unittest.TestCase):
             if not chunk:
                 break
             chunks.append(chunk)
-            offset += len(chunk.encode('utf-8'))
+            # Increment offset by the actual chunk size requested, not the decoded string length
+            offset += chunk_size
         
         # Verify all chunks concatenated equal the original
         reconstructed = "".join(chunks)
