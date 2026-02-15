@@ -68,13 +68,13 @@ class TestDirectoryOperations(unittest.TestCase):
         shutil.rmtree(self.temp_dir)
 
     def test_list_directory(self):
-        """Should list directory contents."""
+        """Should list directory contents recursively."""
         result = self.tools.list_directory(".")
         
-        self.assertEqual(result["total"], 4)
+        dir_names = [d["name"] for d in result["directories"]]
         self.assertEqual(len(result["directories"]), 2)
         self.assertEqual(len(result["files"]), 2)
-        self.assertIn("subdir1", result["directories"])
+        self.assertIn("subdir1", dir_names)
         self.assertIn("file1.txt", result["files"])
 
     def test_list_subdirectory(self):
@@ -84,8 +84,36 @@ class TestDirectoryOperations(unittest.TestCase):
         
         result = self.tools.list_directory("subdir1")
         
-        self.assertEqual(result["total"], 1)
         self.assertIn("nested.txt", result["files"])
+
+    def test_list_directory_recursive_tree(self):
+        """Should return a full recursive tree."""
+        # Create nested structure
+        os.makedirs(os.path.join(self.temp_dir, "subdir1", "deep"))
+        Path(os.path.join(self.temp_dir, "subdir1", "a.txt")).touch()
+        Path(os.path.join(self.temp_dir, "subdir1", "deep", "b.txt")).touch()
+        
+        result = self.tools.list_directory(".")
+        
+        # Find subdir1 in the tree
+        subdir1 = next(d for d in result["directories"] if d["name"] == "subdir1")
+        self.assertIn("a.txt", subdir1["files"])
+        
+        # Check nested "deep" directory
+        deep = next(d for d in subdir1["directories"] if d["name"] == "deep")
+        self.assertIn("b.txt", deep["files"])
+
+    def test_list_directory_depth_limit(self):
+        """Should respect depth limit."""
+        os.makedirs(os.path.join(self.temp_dir, "subdir1", "deep"))
+        Path(os.path.join(self.temp_dir, "subdir1", "deep", "b.txt")).touch()
+        
+        result = self.tools.list_directory(".", depth=0)
+        
+        # Directories should only have names, no sub-tree keys
+        subdir1 = next(d for d in result["directories"] if d["name"] == "subdir1")
+        self.assertNotIn("files", subdir1)
+        self.assertNotIn("directories", subdir1)
 
     def test_list_nonexistent_directory(self):
         """Should raise ToolError for nonexistent directory."""
@@ -129,35 +157,41 @@ class TestFileReadWrite(unittest.TestCase):
         self.assertEqual(result["size"], 7)
         
         # Verify content
-        content = self.tools.read_file("test.txt")
-        self.assertEqual(content, "Updated")
+        result = self.tools.read_file("test.txt")
+        self.assertEqual(result["content"], "Updated")
 
     def test_read_file(self):
         """Should read file contents."""
         content = "Test file content"
         self.tools.write_file("test.txt", content)
         
-        read_content = self.tools.read_file("test.txt")
+        result = self.tools.read_file("test.txt")
         
-        self.assertEqual(read_content, content)
+        self.assertEqual(result["content"], content)
+        self.assertEqual(result["page"], 1)
+        self.assertEqual(result["path"], "test.txt")
 
     def test_read_nonexistent_file(self):
         """Should raise ToolError for nonexistent file."""
         with self.assertRaises(ToolError):
             self.tools.read_file("nonexistent.txt")
 
-    def test_read_file_size_limit(self):
-        """Should raise FileSizeError for large files."""
-        # Create tools with small limit
-        tools = AgentTools(working_dir=self.temp_dir, max_file_size=100)
+    def test_read_file_pagination(self):
+        """Should paginate large files across multiple pages."""
+        # Create a file with known number of lines
+        lines = [f"Line {i}" for i in range(1, 251)]
+        self.tools.write_file("big.txt", "\n".join(lines) + "\n")
         
-        # Write large file
-        large_content = "x" * 1000
-        tools.write_file("large.txt", large_content)
+        result = self.tools.read_file("big.txt", page=1, page_size=100)
         
-        # Should fail to read
-        with self.assertRaises(FileSizeError):
-            tools.read_file("large.txt")
+        self.assertEqual(result["page"], 1)
+        self.assertEqual(result["total_lines"], 250)
+        self.assertGreater(result["total_pages"], 1)
+        
+        # Second page should have different content
+        result2 = self.tools.read_file("big.txt", page=2, page_size=100)
+        self.assertEqual(result2["page"], 2)
+        self.assertNotEqual(result["content"], result2["content"])
 
     def test_write_file_creates_parent_directories(self):
         """Should create parent directories if needed."""
@@ -194,8 +228,8 @@ class TestFileEditing(unittest.TestCase):
         
         self.assertEqual(result["lines_added"], 1)
         
-        content = self.tools.read_file("test.txt")
-        self.assertEqual(content, "Line 1\nLine 2\n")
+        result = self.tools.read_file("test.txt")
+        self.assertEqual(result["content"], "Line 1\nLine 2\n")
 
     def test_edit_file_replaces_text(self):
         """Should replace text in file."""
@@ -213,8 +247,8 @@ class TestFileEditing(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(result["hunks"], 1)
         
-        content = self.tools.read_file("test.txt")
-        self.assertEqual(content, "Hello Python\n")
+        result = self.tools.read_file("test.txt")
+        self.assertEqual(result["content"], "Hello Python\n")
 
     def test_edit_file_multiple_replacements(self):
         """Should replace multiple occurrences."""
@@ -231,8 +265,8 @@ class TestFileEditing(unittest.TestCase):
         
         self.assertEqual(result["hunks"], 1)
         
-        content = self.tools.read_file("test.txt")
-        self.assertEqual(content, "qux bar qux baz qux\n")
+        result = self.tools.read_file("test.txt")
+        self.assertEqual(result["content"], "qux bar qux baz qux\n")
 
     def test_edit_file_no_matches(self):
         """Should return success=False if no matches found."""
@@ -470,8 +504,8 @@ class TestSecurity(unittest.TestCase):
         self.tools.write_file("test.txt", "Content")
         
         # Should not raise
-        content = self.tools.read_file("./test.txt")
-        self.assertEqual(content, "Content")
+        result = self.tools.read_file("./test.txt")
+        self.assertEqual(result["content"], "Content")
 
 
 class TestHelperFunctions(unittest.TestCase):

@@ -156,13 +156,17 @@ TOOL_DEFINITIONS = {
         "type": "function",
         "function": {
             "name": "list_directory",
-            "description": "List contents of a directory",
+            "description": "List contents of a directory as a recursive tree. Returns nested directories and files.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
                         "description": "Directory path relative to working directory"
+                    },
+                    "depth": {
+                        "type": "integer",
+                        "description": "Maximum recursion depth (-1 for unlimited, 0 for immediate only). Default: -1"
                     }
                 },
                 "required": ["path"]
