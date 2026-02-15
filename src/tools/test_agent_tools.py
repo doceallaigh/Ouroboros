@@ -94,7 +94,10 @@ class TestDirectoryOperations(unittest.TestCase):
 
     def test_list_directory_recursive(self):
         """Should list directory contents recursively."""
-        # Create nested structure
+        # Note: This test uses the structure created in setUp (subdir1, subdir2, file1.txt, file2.txt)
+        # and adds nested content to subdir1
+        
+        # Create nested structure within subdir1
         os.makedirs(os.path.join(self.temp_dir, "subdir1", "nested1"))
         os.makedirs(os.path.join(self.temp_dir, "subdir1", "nested2"))
         Path(os.path.join(self.temp_dir, "subdir1", "nested.txt")).touch()
@@ -102,7 +105,7 @@ class TestDirectoryOperations(unittest.TestCase):
         
         result = self.tools.list_directory(".")
         
-        # Check top level
+        # Check top level (2 dirs from setUp + 2 files from setUp)
         self.assertEqual(result["total"], 4)
         self.assertEqual(len(result["directories"]), 2)
         self.assertEqual(len(result["files"]), 2)

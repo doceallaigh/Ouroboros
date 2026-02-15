@@ -178,24 +178,39 @@ class AgentTools:
             
             # Build the tree recursively
             def build_tree(current_path: str, relative_path: str) -> Dict[str, Any]:
-                """Recursively build directory tree."""
+                """
+                Recursively build directory tree.
+                
+                Args:
+                    current_path: Absolute path to current directory
+                    relative_path: Relative path for display
+                    
+                Returns:
+                    Dictionary with path, directories, files, and total count
+                """
                 entries = os.listdir(current_path)
                 
-                directories_dict = {}
+                directories_list = []
                 files = []
                 
+                # Separate directories and files
                 for entry in entries:
                     full_path = os.path.join(current_path, entry)
                     if os.path.isdir(full_path):
-                        # Recursively build tree for subdirectory
-                        subdir_relative = os.path.join(relative_path, entry) if relative_path else entry
-                        directories_dict[entry] = build_tree(full_path, subdir_relative)
+                        directories_list.append(entry)
                     else:
                         files.append(entry)
                 
+                # Sort and build directory tree
+                directories_dict = {}
+                for dir_name in sorted(directories_list):
+                    full_path = os.path.join(current_path, dir_name)
+                    subdir_relative = os.path.join(relative_path, dir_name) if relative_path else dir_name
+                    directories_dict[dir_name] = build_tree(full_path, subdir_relative)
+                
                 return {
                     "path": relative_path if relative_path else ".",
-                    "directories": {k: directories_dict[k] for k in sorted(directories_dict.keys())},
+                    "directories": directories_dict,
                     "files": sorted(files),
                     "total": len(directories_dict) + len(files),
                 }
@@ -204,6 +219,15 @@ class AgentTools:
             
             # Count total directories and files recursively for logging
             def count_total(tree: Dict[str, Any]) -> tuple:
+                """
+                Recursively count total directories and files in tree.
+                
+                Args:
+                    tree: Directory tree structure
+                    
+                Returns:
+                    Tuple of (total_dirs, total_files)
+                """
                 total_dirs = len(tree["directories"])
                 total_files = len(tree["files"])
                 for subdir_tree in tree["directories"].values():
