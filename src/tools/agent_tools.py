@@ -177,6 +177,9 @@ class AgentTools:
                 raise ToolError(f"Not a directory: {path}")
             
             # Build the tree recursively
+            # Cache the real working directory path for security checks
+            real_working = os.path.realpath(self.working_dir)
+            
             def build_tree(current_path: str, relative_path: str) -> Dict[str, Any]:
                 """
                 Recursively build directory tree.
@@ -198,9 +201,14 @@ class AgentTools:
                     full_path = os.path.join(current_path, entry)
                     # Validate that the path (including symlinks) stays within working directory
                     real_path = os.path.realpath(full_path)
-                    real_working = os.path.realpath(self.working_dir)
-                    if not real_path.startswith(real_working):
-                        # Skip entries that escape working directory
+                    try:
+                        # Use commonpath to properly validate path containment
+                        if os.path.commonpath([real_path, real_working]) != real_working:
+                            # Skip entries that escape working directory
+                            logger.warning(f"Skipping path that escapes working directory: {entry}")
+                            continue
+                    except ValueError:
+                        # Paths on different drives (Windows) - skip
                         logger.warning(f"Skipping path that escapes working directory: {entry}")
                         continue
                     

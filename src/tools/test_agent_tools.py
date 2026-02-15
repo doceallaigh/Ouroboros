@@ -10,6 +10,7 @@ import os
 import json
 import difflib
 import subprocess
+import shutil
 from unittest import mock
 from pathlib import Path
 
@@ -173,7 +174,6 @@ class TestDirectoryOperations(unittest.TestCase):
             # The symlink should not appear in the results
             self.assertNotIn("external_link", result["directories"])
         finally:
-            import shutil
             shutil.rmtree(external_dir)
 
 
