@@ -10,6 +10,7 @@ import re
 import time
 from typing import Dict, List, Any, Optional
 
+from crosscutting import event_sourced
 from main.exceptions import OrganizationError
 
 logger = logging.getLogger(__name__)
@@ -164,6 +165,7 @@ def extract_assignments_from_tool_calls(response: str) -> Optional[List[Dict[str
     return assignments if assignments else None
 
 
+@event_sourced("request_decomposed")
 def decompose_request(coordinator, user_request: str) -> str:
     """
     Use a manager agent to decompose a request into tasks.
@@ -239,17 +241,8 @@ def decompose_request(coordinator, user_request: str) -> str:
             invalid_roles = validate_assignment_roles(coordinator, assignments)
             
             if invalid_roles:
-                # Roles are invalid, record event and retry with feedback
+                # Roles are invalid, retry with feedback
                 if attempt < max_retries - 1:
-                    coordinator.filesystem.record_event(
-                        coordinator.filesystem.EVENT_ROLE_VALIDATION_FAILED,
-                        {
-                            "attempt": attempt + 1,
-                            "invalid_roles": invalid_roles,
-                            "user_request": user_request[:200],  # Truncate for log
-                        }
-                    )
-                    
                     logger.warning(
                         f"Manager assigned to invalid roles: {invalid_roles}. "
                         f"Retrying with corrective feedback..."
@@ -264,29 +257,11 @@ def decompose_request(coordinator, user_request: str) -> str:
                         f"[SYSTEM CONSTRAINT: You must ONLY assign tasks to these roles: {valid_roles}]"
                     )
                     user_request = corrective_request
-                    
-                    # Record retry event
-                    coordinator.filesystem.record_event(
-                        coordinator.filesystem.EVENT_ROLE_RETRY,
-                        {
-                            "attempt": attempt + 1,
-                            "valid_roles": valid_roles,
-                        }
-                    )
                     continue
                 else:
                     error_msg = f"Manager failed to assign valid roles after {max_retries} attempts. Invalid roles: {invalid_roles}"
                     logger.error(error_msg)
                     raise OrganizationError(error_msg)
-            
-            # Record successful decomposition event and convert to JSON for return
-            coordinator.filesystem.record_event(
-                coordinator.filesystem.EVENT_REQUEST_DECOMPOSED,
-                {
-                    "attempt": attempt + 1,
-                    "num_assignments": len(assignments) if isinstance(assignments, list) else 0,
-                }
-            )
             
             # Convert assignments back to JSON string for compatibility
             logger.debug(f"Request decomposed into {len(assignments)} assignments")
