@@ -36,42 +36,20 @@ def create_final_verification_task(coordinator, user_request: str, all_results: 
     
     final_verification_task = {
         "role": "auditor",
-        "task": f"""Perform a COMPREHENSIVE FINAL VERIFICATION of the entire solution.
+        "task": f"""Verify the solution for the following request:
 
 ORIGINAL REQUEST:
-{user_request[:1000]}
+{user_request[:500]}
 
-VERIFICATION CHECKLIST:
-1. List all deliverables mentioned in the requirements
-2. Check if each deliverable file exists in the workspace
-3. Verify the quality and completeness of each deliverable
-4. Check for integration issues between components
-5. Validate that the solution meets ALL original requirements
-6. Report on overall solution readiness (PASS/FAIL with justification)
-
-CRITICAL: You MUST use the provided tools to:
-- List all files in the current directory and subdirectories
-- Read key files to verify their implementation
-- Check for any missing or incomplete components
-
-EXPECTED DELIVERABLES:
-Look for files matching these patterns and verify their presence and quality:
-- requirements.txt (or similar dependency file)
-- Python modules/scripts (.py files)
-- Documentation (README.md or similar)
-- Test files
-- Any model files or data artifacts mentioned
+Be EFFICIENT — only check what was actually requested. Do NOT look for files that were never part of the request (e.g. don't search for requirements.txt, README.md, or test files unless they were explicitly requested).
 {blocker_summary}
+Steps:
+1. list_all_files('.') to see what was created
+2. read_file() on the key deliverable(s)
+3. run_python() to verify it works (if applicable)
+4. Call confirm_task_complete() with your PASS/FAIL verdict
 
-REPORT FORMAT:
-Provide a clear, structured report with:
-1. Deliverables Status (list each with PRESENT/MISSING or COMPLETE/INCOMPLETE)
-2. Quality Assessment (code quality, documentation, error handling)
-3. Integration Status (all components work together)
-4. Overall Result: PASS (solution ready) or FAIL (issues remain)
-5. Recommendations (what needs to be fixed if FAIL)
-
-If any critical deliverables are missing or incomplete, report this as a BLOCKER callback.""",
+Do this in as few steps as possible. Once you can determine PASS or FAIL, call confirm_task_complete() immediately.""",
         "sequence": 99,  # Very high sequence to run after everything else
     }
     

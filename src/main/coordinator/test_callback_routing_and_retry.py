@@ -337,8 +337,9 @@ class TestCompleteWorkflow:
         # Create final verification task
         task = coordinator.create_final_verification_task("Test request", [])
         
-        # Task should be comprehensive
-        assert "VERIFICATION CHECKLIST" in task["task"]
+        # Task should reference the original request and be an auditor task
+        assert "ORIGINAL REQUEST" in task["task"]
+        assert "confirm_task_complete" in task["task"]
         assert task["role"] == "auditor"
         assert task["sequence"] == 99
 

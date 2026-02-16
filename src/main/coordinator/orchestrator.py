@@ -128,18 +128,25 @@ def assign_and_execute(coordinator, user_request: str) -> List[Dict[str, Any]]:
     results = coordinator.execute_all_assignments(assignments, user_request)
     
     # Step 5: Create and execute final verification task
-    verification_task = coordinator.create_final_verification_task(user_request, results)
-    if verification_task:
-        verification_result = coordinator.execute_single_assignment(
-            role=verification_task.get("role"),
-            task={
-                "description": verification_task.get("task"),
-                "task": verification_task.get("task")
-            },
-            original_request=user_request
-        )
-        results.append(verification_result)
-        logger.info("Final verification completed")
+    # Skip if the manager already assigned an auditor — avoid redundant double-audit
+    has_auditor_assignment = any(
+        a.get("role") == "auditor" for a in assignments
+    )
+    if has_auditor_assignment:
+        logger.info("Manager already assigned an auditor task — skipping redundant final verification")
+    else:
+        verification_task = coordinator.create_final_verification_task(user_request, results)
+        if verification_task:
+            verification_result = coordinator.execute_single_assignment(
+                role=verification_task.get("role"),
+                task={
+                    "description": verification_task.get("task"),
+                    "task": verification_task.get("task")
+                },
+                original_request=user_request
+            )
+            results.append(verification_result)
+            logger.info("Final verification completed")
     
     logger.info(f"assign_and_execute complete with {len(results)} results")
     return results

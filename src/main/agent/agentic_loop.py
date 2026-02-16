@@ -243,6 +243,19 @@ def execute_with_agentic_loop(agent, task: Dict[str, Any], working_dir: str = ".
             task_complete = True
             break
         
+        # Auto-complete for non-auditor roles: if at least one write/action
+        # tool succeeded and no errors occurred, the task is done.
+        if agent.role != "auditor":
+            tool_outputs_check = tool_results.get("tool_outputs", [])
+            results_check = tool_results.get("results", [])
+            executed_tool_names_check = {out.get("tool", "") for out in tool_outputs_check}
+            has_write_tool = bool(executed_tool_names_check - READ_ONLY_TOOLS - {""})
+            all_succeeded = all(r.get("success", False) for r in results_check) if results_check else False
+            if has_write_tool and all_succeeded:
+                logger.info(f"Agent {agent.name} auto-completed: write tools succeeded without errors")
+                task_complete = True
+                break
+        
         # Inject tool results into conversation using correct message roles
         tool_outputs = tool_results.get("tool_outputs", [])
         

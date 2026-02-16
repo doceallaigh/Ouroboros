@@ -68,13 +68,21 @@ def execute_single_assignment(
         # Get working directory for tool execution
         working_dir = coordinator.filesystem.src_dir
         
+        # Scale max iterations by role — auditors need fewer iterations than developers
+        role_max_iterations = {
+            "auditor": 5,
+            "developer": 6,
+            "manager": 3,
+        }
+        max_iter = role_max_iterations.get(role, 10)
+
         # Execute task using agentic loop (with tool execution)
-        logger.info(f"Agent {agent.name} executing task with agentic loop (role: {role})")
+        logger.info(f"Agent {agent.name} executing task with agentic loop (role: {role}, max_iterations={max_iter})")
         loop_result = execute_with_agentic_loop(
             agent=agent,
             task=agent_task,
             working_dir=working_dir,
-            max_iterations=15
+            max_iterations=max_iter
         )
         
         # Record execution event
