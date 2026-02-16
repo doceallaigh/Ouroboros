@@ -1,4 +1,4 @@
-"""
+﻿"""
 Unit tests for agent_tools module.
 
 Tests file operations, directory traversal, and safety features.
@@ -611,7 +611,7 @@ class TestGitOperations(unittest.TestCase):
         repo_url = "https://github.com/example/repo.git"
         completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
 
-        with mock.patch("tools.agent_tools.subprocess.run", return_value=completed) as mocked_run:
+        with mock.patch("main.agent.tool_runner.subprocess.run", return_value=completed) as mocked_run:
             result = self.tools.clone_repo(repo_url)
 
         self.assertEqual(result["path"], "repo")
@@ -625,7 +625,7 @@ class TestGitOperations(unittest.TestCase):
         repo_url = "https://github.com/example/repo.git"
         completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
 
-        with mock.patch("tools.agent_tools.subprocess.run", return_value=completed) as mocked_run:
+        with mock.patch("main.agent.tool_runner.subprocess.run", return_value=completed) as mocked_run:
             result = self.tools.clone_repo(repo_url, branch="master", depth=1)
 
         self.assertTrue(result["success"])
@@ -672,7 +672,7 @@ class TestGitCheckoutBranch(unittest.TestCase):
 
         completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
 
-        with mock.patch("tools.agent_tools.subprocess.run", return_value=completed) as mocked_run:
+        with mock.patch("main.agent.tool_runner.subprocess.run", return_value=completed) as mocked_run:
             result = self.tools.checkout_branch("test_repo", "task_123_implement_feature")
 
         self.assertTrue(result["success"])
@@ -692,7 +692,7 @@ class TestGitCheckoutBranch(unittest.TestCase):
 
         completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
 
-        with mock.patch("tools.agent_tools.subprocess.run", return_value=completed) as mocked_run:
+        with mock.patch("main.agent.tool_runner.subprocess.run", return_value=completed) as mocked_run:
             result = self.tools.checkout_branch("test_repo", "existing_branch", create=False)
 
         self.assertTrue(result["success"])
@@ -749,7 +749,7 @@ class TestGitPushBranch(unittest.TestCase):
         completed_remote = subprocess.CompletedProcess(args=[], returncode=0, stdout="origin\n", stderr="")
         completed_push = subprocess.CompletedProcess(args=[], returncode=0, stdout="pushed\n", stderr="")
 
-        with mock.patch("tools.agent_tools.subprocess.run", side_effect=[
+        with mock.patch("main.agent.tool_runner.subprocess.run", side_effect=[
             completed_rev,
             completed_remote,
             completed_push,
@@ -775,7 +775,7 @@ class TestGitPushBranch(unittest.TestCase):
         completed_rev = subprocess.CompletedProcess(args=[], returncode=0, stdout="feature/test\n", stderr="")
         completed_remote = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
 
-        with mock.patch("tools.agent_tools.subprocess.run", side_effect=[
+        with mock.patch("main.agent.tool_runner.subprocess.run", side_effect=[
             completed_rev,
             completed_remote,
         ]):
@@ -810,7 +810,7 @@ class TestGitCreatePullRequest(unittest.TestCase):
             stderr="",
         )
 
-        with mock.patch("tools.agent_tools.subprocess.run", side_effect=[
+        with mock.patch("main.agent.tool_runner.subprocess.run", side_effect=[
             completed_gh,
             completed_rev,
             completed_pr,
@@ -843,7 +843,7 @@ class TestGitCreatePullRequest(unittest.TestCase):
             stderr="A pull request already exists for branch feature_add",
         )
 
-        with mock.patch("tools.agent_tools.subprocess.run", side_effect=[
+        with mock.patch("main.agent.tool_runner.subprocess.run", side_effect=[
             completed_gh,
             completed_rev,
             completed_pr,
@@ -858,7 +858,7 @@ class TestGitCreatePullRequest(unittest.TestCase):
         repo_dir = os.path.join(self.temp_dir, "test_repo")
         os.makedirs(os.path.join(repo_dir, ".git"), exist_ok=True)
 
-        with mock.patch("tools.agent_tools.subprocess.run", side_effect=FileNotFoundError()):
+        with mock.patch("main.agent.tool_runner.subprocess.run", side_effect=FileNotFoundError()):
             with self.assertRaises(GitError):
                 self.tools.create_pull_request("test_repo")
 

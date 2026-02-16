@@ -10,47 +10,58 @@ import json
 import pytest
 import os
 import tempfile
-from tools.agent_tools import AgentTools, ToolError
+from main.agent.tool_runner import ToolError
 
 
 class TestAuditFilesValidation:
-    """Test that audit_files only audits produced files."""
+    """Test that audit_files only audits produced files (via ToolEnvironment)."""
     
     def setup_method(self):
         """Set up test fixtures."""
         self.temp_dir = tempfile.mkdtemp()
-        self.tools = AgentTools(working_dir=self.temp_dir)
+        self.mock_agent = Mock()
+        self.mock_agent.name = "developer01"
+        self.mock_agent.role = "developer"
+        self.mock_agent.config = {
+            "role": "developer",
+            "allowed_tools": [
+                "read_file", "write_file", "edit_file",
+                "list_directory", "audit_files", "confirm_task_complete",
+            ],
+        }
+
+    def teardown_method(self):
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _make_env(self):
+        from main.agent.tool_runner import ToolEnvironment
+        return ToolEnvironment(agent=self.mock_agent, working_dir=self.temp_dir)
     
     def test_audit_files_requires_produced_files(self):
         """audit_files should reject files not in produced_files list."""
-        # Create a file first
+        env = self._make_env()
+        bindings = env.get_bindings()
+        
+        # Create a file on disk but don't produce it through write_file
         test_file = os.path.join(self.temp_dir, "test.py")
         with open(test_file, 'w') as f:
             f.write("print('hello')")
         
-        # Try to audit a file that wasn't in produced_files
         with pytest.raises(ToolError) as exc_info:
-            self.tools.audit_files(
-                ["test.py"],
-                description="Review code",
-                produced_files=[]  # Empty list means no files were produced
-            )
+            bindings["audit_files"](["test.py"], description="Review code")
         
         assert "haven't been produced" in str(exc_info.value)
     
     def test_audit_files_succeeds_for_produced_files(self):
         """audit_files should succeed for files in produced_files list."""
-        # Create a file
-        test_file = os.path.join(self.temp_dir, "test.py")
-        with open(test_file, 'w') as f:
-            f.write("print('hello')")
+        env = self._make_env()
+        bindings = env.get_bindings()
         
-        # Audit the file with it in produced_files
-        result = self.tools.audit_files(
-            ["test.py"],
-            description="Review code",
-            produced_files=["test.py"]  # File is in produced list
-        )
+        # Produce the file through write_file so it's tracked
+        bindings["write_file"]("test.py", "print('hello')")
+        
+        result = bindings["audit_files"](["test.py"], description="Review code")
         
         assert result["status"] == "audit_requested"
         assert "test.py" in result["files"]
@@ -58,38 +69,35 @@ class TestAuditFilesValidation:
     
     def test_audit_files_partial_validation(self):
         """audit_files with mixed produced/non-produced files should fail."""
-        # Create files
-        test_file1 = os.path.join(self.temp_dir, "produced.py")
-        test_file2 = os.path.join(self.temp_dir, "not_produced.py")
-        with open(test_file1, 'w') as f:
-            f.write("# produced")
-        with open(test_file2, 'w') as f:
+        env = self._make_env()
+        bindings = env.get_bindings()
+        
+        # Produce one file, manually create the other
+        bindings["write_file"]("produced.py", "# produced")
+        other_file = os.path.join(self.temp_dir, "not_produced.py")
+        with open(other_file, 'w') as f:
             f.write("# not produced")
         
-        # Try to audit both but only one is in produced_files
         with pytest.raises(ToolError) as exc_info:
-            self.tools.audit_files(
+            bindings["audit_files"](
                 ["produced.py", "not_produced.py"],
                 description="Review code",
-                produced_files=["produced.py"]  # Only one file
             )
         
         assert "not_produced.py" in str(exc_info.value)
     
     def test_audit_files_empty_produced_list_fails(self):
-        """audit_files should fail when produced_files is empty but files are provided."""
-        # Create a file
+        """audit_files should fail when no files have been produced."""
+        env = self._make_env()
+        bindings = env.get_bindings()
+        
+        # Create a file on disk but don't produce it
         test_file = os.path.join(self.temp_dir, "test.py")
         with open(test_file, 'w') as f:
             f.write("print('hello')")
         
-        # Try to audit with empty produced list
         with pytest.raises(ToolError):
-            self.tools.audit_files(
-                ["test.py"],
-                description="Review code",
-                produced_files=[]
-            )
+            bindings["audit_files"](["test.py"], description="Review code")
 
 
 class TestAuditorRole(unittest.TestCase):

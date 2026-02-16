@@ -191,16 +191,12 @@ class TestToolEnvironment(unittest.TestCase):
         self.assertEqual(env.audit_requests[0]["files"], ["app.py"])
 
     def test_audit_validates_against_produced_files(self):
-        """Developer audit_files should pass produced files for validation."""
+        """Developer audit_files should reject files not yet produced."""
         env = self._make_env()
         bindings = env.get_bindings()
-        bindings["write_file"]("app.py", "print('hello')")
-        with patch.object(env.tools, "audit_files", return_value="ok") as mock_audit:
-            bindings["audit_files"](["app.py"], description="Review")
-            # Verify produced_files was passed
-            mock_audit.assert_called_once()
-            call_kwargs = mock_audit.call_args
-            self.assertIn("app.py", call_kwargs[1].get("produced_files", call_kwargs[0][3] if len(call_kwargs[0]) > 3 else []))
+        # Try to audit a file that hasn't been written yet
+        with self.assertRaises(ToolError):
+            bindings["audit_files"](["unproduced.py"], description="Review")
 
 
 class TestExecuteToolsFromResponse(unittest.TestCase):

@@ -10,7 +10,7 @@ from typing import Dict, Any, List
 
 from comms import APIError, extract_content_from_response, extract_full_response
 from main.agent.executor import run_async, _convert_tool_calls_to_text, parse_model_endpoints, send_llm_request
-from main.agent.tool_definitions import get_tools_for_role
+from main.agent.tool_runner import get_tools_for_role
 
 logger = logging.getLogger(__name__)
 

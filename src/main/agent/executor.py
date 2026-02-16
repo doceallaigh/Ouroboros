@@ -11,7 +11,7 @@ import time
 from typing import Dict, Any
 
 from comms import APIError, extract_content_from_response, extract_full_response
-from main.agent.tool_definitions import get_tools_for_role
+from main.agent.tool_runner import get_tools_for_role
 
 logger = logging.getLogger(__name__)
 

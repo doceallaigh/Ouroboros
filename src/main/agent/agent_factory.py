@@ -10,7 +10,7 @@ from typing import Dict, Optional, Any
 from main.agent import Agent
 from main.exceptions import OrganizationError
 from main.git import is_git_repository
-from tools import AgentTools
+from main.agent.tool_runner import TOOL_DEFINITIONS
 from fileio import FileSystem
 from comms import ChannelFactory, OutputPostProcessingStrategy
 
@@ -72,7 +72,7 @@ def create_agent_for_role(
         git_tools = {"clone_repo", "checkout_branch"}
         allowed_tools = config_copy.get("allowed_tools")
         if allowed_tools is None:
-            allowed_tools = [tool for tool in AgentTools.TOOL_METHODS if tool not in git_tools]
+            allowed_tools = [tool for tool in TOOL_DEFINITIONS if tool not in git_tools]
         else:
             allowed_tools = [tool for tool in allowed_tools if tool not in git_tools]
         config_copy["allowed_tools"] = allowed_tools

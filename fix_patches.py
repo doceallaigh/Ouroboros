@@ -5,9 +5,9 @@ import re
 with open('src/tools/test_agent_tools.py', 'r') as f:
     content = f.read()
 
-# Fix agent_tools patches
-content = re.sub(r'@mock\.patch\("agent_tools\.', '@mock.patch("tools.agent_tools.', content)
-content = re.sub(r"@mock\.patch\('agent_tools\.", "@mock.patch('tools.agent_tools.", content)
+# Fix agent_tools patches (canonical location is now main.agent.tool_runner)
+content = re.sub(r'@mock\.patch\("agent_tools\.', '@mock.patch("main.agent.tool_runner.', content)
+content = re.sub(r"@mock\.patch\('agent_tools\.", "@mock.patch('main.agent.tool_runner.", content)
 
 # Fix code_runner patches  
 content = re.sub(r'@mock\.patch\("code_runner\.', '@mock.patch("tools.code_runner.', content)
