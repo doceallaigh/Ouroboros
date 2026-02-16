@@ -25,6 +25,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple, Set
 
+from fileio.audit_log import AuditLogManager
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -1601,6 +1603,28 @@ TOOL_DEFINITIONS: Dict[str, Any] = {
             }
         }
     },
+    "record_audit_success": {
+        "type": "function",
+        "function": {
+            "name": "record_audit_success",
+            "description": "Record successful audit of files or directories. Files/directories are recorded in the audit_log with current timestamp. Task is complete when all files in edit_log are audited with later timestamps.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_paths": {
+                        "type": "array",
+                        "description": "List of file paths that were audited",
+                        "items": {"type": "string"}
+                    },
+                    "summary": {
+                        "type": "string",
+                        "description": "Brief summary of the audit findings"
+                    }
+                },
+                "required": ["file_paths"]
+            }
+        }
+    },
     "search_package": {
         "type": "function",
         "function": {
@@ -1716,6 +1740,7 @@ Package Management:
 
 Task Completion:
   - confirm_task_complete(summary: str = "", deliverables: list = None) -> dict: Confirm task is complete and provide summary
+  - record_audit_success(file_paths: list, summary: str = "") -> dict: Record successful audit of files with timestamp. Task complete when all edited files are audited.
 
 Auditing:
   - audit_files(file_paths: list, description: str = "", focus_areas: list = None) -> dict: Request an auditor to review specific files
@@ -1817,6 +1842,9 @@ class ToolEnvironment:
         self.audit_requests: List[Dict[str, Any]] = []
         self.task_complete: bool = False
         self.total_calls: int = 0
+        
+        # Initialize audit log manager for tracking edits and audits
+        self.audit_log_manager = AuditLogManager(working_dir=working_dir)
 
         self._agent = agent
         self._bindings: Dict[str, Any] = {}
@@ -1851,7 +1879,7 @@ class ToolEnvironment:
             "delete_file":    (tools.delete_file,    False),
         }
 
-        WRITE_TOOLS = {"write_file", "edit_file"}
+        WRITE_TOOLS = {"write_file", "edit_file", "delete_file"}
 
         for name, (func, supports_page) in CORE_TOOLS.items():
             track_file = is_developer and name in WRITE_TOOLS
@@ -1976,6 +2004,38 @@ class ToolEnvironment:
         b["confirm_task_complete"] = self._wrap(
             "confirm_task_complete", _confirm)
 
+        # ---- record_audit_success ------------------------------------------
+        def _record_audit(file_paths, summary=""):
+            """Record successful audit of files."""
+            # Record audit in the audit log manager
+            self.audit_log_manager.record_audit(file_paths)
+            
+            # Check if task is complete
+            task_complete = self.audit_log_manager.is_task_complete()
+            unaudited = self.audit_log_manager.get_unaudited_files()
+            
+            result = {
+                "status": "audit_recorded",
+                "audited_files": file_paths,
+                "summary": summary,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "task_complete": task_complete,
+            }
+            
+            if task_complete:
+                self.task_complete = True
+                result["message"] = "All edited files have been audited. Task is complete."
+            else:
+                result["message"] = f"Audit recorded. {len(unaudited)} file(s) still need auditing."
+                result["unaudited_files"] = unaudited
+                result["action_required"] = f"Please audit the following files: {', '.join(unaudited)}"
+            
+            return result
+
+        b["record_audit_success"] = self._wrap(
+            "record_audit_success", _record_audit)
+
+
     # -- wrapper helpers -----------------------------------------------------
 
     def _wrap(self, name: str, func, *, supports_page: bool = False,
@@ -1995,6 +2055,8 @@ class ToolEnvironment:
                 path = kwargs.get("path") if kwargs and "path" in kwargs else (args[0] if args else None)
                 if path:
                     env.files_produced.add(path)
+                    # Also record edit in audit log manager
+                    env.audit_log_manager.record_edit(path)
 
             # Capture output
             page_index = page if isinstance(page, int) and page > 0 else 1

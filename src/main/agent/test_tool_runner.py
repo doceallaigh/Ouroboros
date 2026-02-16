@@ -179,6 +179,72 @@ class TestToolEnvironment(unittest.TestCase):
         bindings["confirm_task_complete"]()
         self.assertTrue(env.task_complete)
 
+    # --- record_audit_success tests ---
+
+    def test_record_audit_success_records_files(self):
+        """record_audit_success() should record audited files in audit_log."""
+        env = self._make_env(allowed_tools=["record_audit_success", "write_file", "edit_file"])
+        bindings = env.get_bindings()
+        
+        # Record audit
+        result = bindings["record_audit_success"](file_paths=["test.py"])
+        
+        self.assertEqual(result["status"], "audit_recorded")
+        self.assertIn("test.py", result["audited_files"])
+        self.assertIn("test.py", env.audit_log_manager.audit_log)
+
+    def test_record_audit_success_task_complete_no_edits(self):
+        """record_audit_success() should mark task complete when no files were edited."""
+        env = self._make_env(allowed_tools=["record_audit_success"])
+        bindings = env.get_bindings()
+        
+        # No edits made, task should be complete after any audit
+        result = bindings["record_audit_success"](file_paths=["test.py"])
+        
+        self.assertTrue(result["task_complete"])
+        self.assertTrue(env.task_complete)
+
+    def test_record_audit_success_task_incomplete_with_edits(self):
+        """record_audit_success() should not complete task when edited files are not all audited."""
+        env = self._make_env(allowed_tools=["record_audit_success", "write_file", "edit_file"])
+        bindings = env.get_bindings()
+        
+        # Edit some files
+        bindings["write_file"]("file1.py", "content1")
+        bindings["write_file"]("file2.py", "content2")
+        
+        # Audit only one file
+        result = bindings["record_audit_success"](file_paths=["file1.py"])
+        
+        self.assertFalse(result["task_complete"])
+        self.assertFalse(env.task_complete)
+        self.assertIn("file2.py", result["unaudited_files"])
+
+    def test_record_audit_success_task_complete_all_audited(self):
+        """record_audit_success() should complete task when all edited files are audited."""
+        env = self._make_env(allowed_tools=["record_audit_success", "write_file", "edit_file"])
+        bindings = env.get_bindings()
+        
+        # Edit some files
+        bindings["write_file"]("file1.py", "content1")
+        bindings["write_file"]("file2.py", "content2")
+        
+        # Audit all files
+        result = bindings["record_audit_success"](file_paths=["file1.py", "file2.py"])
+        
+        self.assertTrue(result["task_complete"])
+        self.assertTrue(env.task_complete)
+
+    def test_record_audit_success_includes_timestamp(self):
+        """record_audit_success() should include a timestamp."""
+        env = self._make_env(allowed_tools=["record_audit_success"])
+        bindings = env.get_bindings()
+        
+        result = bindings["record_audit_success"](file_paths=["test.py"])
+        
+        self.assertIn("timestamp", result)
+        self.assertTrue(result["timestamp"])
+
     # --- Audit tracking tests ---
 
     def test_developer_audit_files_tracked(self):

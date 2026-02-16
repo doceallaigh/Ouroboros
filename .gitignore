@@ -3,6 +3,10 @@ test_output.log
 test_output.txt
 test_results.txt
 
+# Audit workflow log files
+edit_log.json
+audit_log.json
+
 .vscode/
 shared_repo/
 __pycache__/
