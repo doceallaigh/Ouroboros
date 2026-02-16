@@ -10,6 +10,7 @@ import logging
 import time
 from typing import Dict, Any
 
+from crosscutting import event_sourced
 from comms import APIError, extract_content_from_response, extract_full_response
 from main.agent.tool_runner import get_tools_for_role
 
@@ -303,6 +304,7 @@ def send_llm_request(agent, payload: dict, selected_endpoint: str) -> dict:
     return {"response": result, "message": message}
 
 
+@event_sourced("task_execution")
 def execute_task(agent, task: Dict[str, Any]) -> str:
     """
     Execute a task using the agent with retry logic for timeouts.
@@ -370,15 +372,6 @@ def execute_task(agent, task: Dict[str, Any]) -> str:
             if "timed out" in str(e).lower():
                 last_error = e
                 if attempt < agent.MAX_RETRIES - 1:
-                    agent.filesystem.record_event(
-                        agent.filesystem.EVENT_TIMEOUT_RETRY,
-                        {
-                            "agent": agent.name,
-                            "attempt": attempt + 1,
-                            "timeout_seconds": base_timeout * (agent.INITIAL_TIMEOUT_MULTIPLIER ** attempt),
-                            "next_timeout_seconds": base_timeout * (agent.INITIAL_TIMEOUT_MULTIPLIER ** (attempt + 1)),
-                        }
-                    )
                     logger.warning(
                         f"Agent {agent.name} timeout (attempt {attempt + 1}/{agent.MAX_RETRIES}), "
                         f"retrying in {backoff_delay}s with increased timeout"

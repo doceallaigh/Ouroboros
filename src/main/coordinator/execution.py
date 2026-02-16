@@ -8,6 +8,7 @@ import json
 import logging
 from typing import Dict, Any, Optional
 
+from crosscutting import event_sourced
 from main.exceptions import OrganizationError
 from main.agent import Agent
 from main.agent.agentic_loop import execute_with_agentic_loop
@@ -15,6 +16,7 @@ from main.agent.agentic_loop import execute_with_agentic_loop
 logger = logging.getLogger(__name__)
 
 
+@event_sourced("task_completed")
 def execute_single_assignment(
     coordinator,
     role: str,
@@ -83,21 +85,6 @@ def execute_single_assignment(
             task=agent_task,
             working_dir=working_dir,
             max_iterations=max_iter
-        )
-        
-        # Record execution event
-        coordinator.filesystem.record_event(
-            coordinator.filesystem.EVENT_TASK_COMPLETED,
-            {
-                "role": role,
-                "agent": agent.name,
-                "iteration_count": loop_result.get("iteration_count", 0),
-                "task_complete": loop_result.get("task_complete", False),
-                "tools_executed": any(
-                    tr.get("tools_executed", False) 
-                    for tr in loop_result.get("tool_results", [])
-                )
-            }
         )
         
         # Build result
