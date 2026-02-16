@@ -88,7 +88,7 @@ def event_sourced(event_type: Optional[str] = None, include_result: bool = False
                 "function": func.__name__,
                 "module": func.__module__,
                 "parameters": param_dict,
-                "timestamp": datetime.datetime.now().isoformat(),
+                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             }
             
             # Determine event type
