@@ -2026,7 +2026,7 @@ class ToolEnvironment:
                 self.task_complete = True
                 result["message"] = "All edited files have been audited. Task is complete."
             else:
-                result["message"] = f"Audit recorded. {len(unaudited)} file(s) still need auditing: {', '.join(unaudited)}"
+                result["message"] = f"Audit recorded. {len(unaudited)} file(s) still need auditing."
                 result["unaudited_files"] = unaudited
                 result["action_required"] = f"Please audit the following files: {', '.join(unaudited)}"
             
