@@ -144,10 +144,11 @@ class TestEventSourcingDecorator(unittest.TestCase):
         events = fs.get_events(event_type="test_event")
         event = events[0]
         
-        # Should record summaries, not full objects
+        # Object should be summarized
         self.assertIn("TestClass", event["data"]["parameters"]["obj_param"])
-        self.assertIn("list", event["data"]["parameters"]["list_param"])
-        self.assertIn("dict", event["data"]["parameters"]["dict_param"])
+        # Small collections should have actual values
+        self.assertEqual(event["data"]["parameters"]["list_param"], [1, 2, 3])
+        self.assertEqual(event["data"]["parameters"]["dict_param"], {"key": "value"})
     
     def test_decorator_works_without_filesystem(self):
         """Should gracefully handle objects without filesystem attribute."""
@@ -276,6 +277,79 @@ class TestEventSourcingDecorator(unittest.TestCase):
         event = events[0]
         self.assertNotIn("cls", event["data"]["parameters"])
         self.assertIn("arg1", event["data"]["parameters"])
+    
+    def test_decorator_records_exceptions(self):
+        """Should record exception events when function raises."""
+        fs = FileSystem(shared_dir=self.shared_dir, replay_mode=False)
+        
+        class TestClass:
+            def __init__(self):
+                self.filesystem = fs
+            
+            @event_sourced("test_event")
+            def failing_method(self):
+                raise ValueError("Something went wrong")
+        
+        obj = TestClass()
+        
+        # Should raise the exception
+        with self.assertRaises(ValueError):
+            obj.failing_method()
+        
+        # Should have recorded a failure event
+        events = fs.get_events(event_type="test_event_failed")
+        self.assertEqual(len(events), 1)
+        
+        event = events[0]
+        self.assertEqual(event["data"]["status"], "failed")
+        self.assertIn("exception", event["data"])
+        self.assertEqual(event["data"]["exception"]["type"], "ValueError")
+        self.assertIn("Something went wrong", event["data"]["exception"]["message"])
+    
+    def test_decorator_with_small_collections(self):
+        """Should record actual values for small collections."""
+        fs = FileSystem(shared_dir=self.shared_dir, replay_mode=False)
+        
+        class TestClass:
+            def __init__(self):
+                self.filesystem = fs
+            
+            @event_sourced("test_event")
+            def test_method(self, small_list, small_dict):
+                return "result"
+        
+        obj = TestClass()
+        obj.test_method([1, 2, 3], {"key": "value"})
+        
+        events = fs.get_events(event_type="test_event")
+        event = events[0]
+        
+        # Should record actual values, not summaries
+        self.assertEqual(event["data"]["parameters"]["small_list"], [1, 2, 3])
+        self.assertEqual(event["data"]["parameters"]["small_dict"], {"key": "value"})
+    
+    def test_decorator_with_large_collections(self):
+        """Should summarize large collections."""
+        fs = FileSystem(shared_dir=self.shared_dir, replay_mode=False)
+        
+        class TestClass:
+            def __init__(self):
+                self.filesystem = fs
+            
+            @event_sourced("test_event")
+            def test_method(self, large_list):
+                return "result"
+        
+        obj = TestClass()
+        obj.test_method(list(range(100)))
+        
+        events = fs.get_events(event_type="test_event")
+        event = events[0]
+        
+        # Should record summary, not full list
+        param_value = event["data"]["parameters"]["large_list"]
+        self.assertIsInstance(param_value, str)
+        self.assertIn("100", param_value)
 
 
 if __name__ == '__main__':
