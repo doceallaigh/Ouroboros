@@ -47,9 +47,9 @@ Steps:
 1. list_all_files('.') to see what was created
 2. read_file() on the key deliverable(s)
 3. run_python() to verify it works (if applicable)
-4. Call confirm_task_complete() with your PASS/FAIL verdict
+4. Call record_audit_success(file_paths=[...], summary='...') with your PASS/FAIL verdict
 
-Do this in as few steps as possible. Once you can determine PASS or FAIL, call confirm_task_complete() immediately.""",
+Do this in as few steps as possible. Once you can determine PASS or FAIL, call record_audit_success() immediately.""",
         "sequence": 99,  # Very high sequence to run after everything else
     }
     
