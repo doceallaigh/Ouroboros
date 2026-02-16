@@ -37,12 +37,6 @@ class TestAuditLogManager(unittest.TestCase):
         self.assertIn("test.py", self.manager.edit_log)
         self.assertTrue(self.manager.edit_log["test.py"])  # Has timestamp
     
-    def test_record_edit_with_custom_timestamp(self):
-        """Should record edit with provided timestamp."""
-        timestamp = "2024-01-01T12:00:00+00:00"
-        self.manager.record_edit("test.py", timestamp)
-        self.assertEqual(self.manager.edit_log["test.py"], timestamp)
-    
     def test_record_edit_saves_to_disk(self):
         """Should persist edit_log to disk."""
         self.manager.record_edit("test.py")
@@ -59,12 +53,6 @@ class TestAuditLogManager(unittest.TestCase):
         self.manager.record_audit(["test.py", "app.py"])
         self.assertIn("test.py", self.manager.audit_log)
         self.assertIn("app.py", self.manager.audit_log)
-    
-    def test_record_audit_with_custom_timestamp(self):
-        """Should record audit with provided timestamp."""
-        timestamp = "2024-01-01T13:00:00+00:00"
-        self.manager.record_audit(["test.py"], timestamp)
-        self.assertEqual(self.manager.audit_log["test.py"], timestamp)
     
     def test_record_audit_saves_to_disk(self):
         """Should persist audit_log to disk."""
@@ -88,57 +76,55 @@ class TestAuditLogManager(unittest.TestCase):
     
     def test_is_task_complete_with_audited_files(self):
         """Should return True when all edited files are audited with later timestamps."""
-        edit_time = "2024-01-01T12:00:00+00:00"
-        audit_time = "2024-01-01T13:00:00+00:00"
+        import time
         
-        self.manager.record_edit("test.py", edit_time)
-        self.manager.record_audit(["test.py"], audit_time)
+        self.manager.record_edit("test.py")
+        time.sleep(0.01)  # Ensure audit timestamp is later
+        self.manager.record_audit(["test.py"])
         
         self.assertTrue(self.manager.is_task_complete())
     
     def test_is_task_complete_with_earlier_audit(self):
         """Should return False when audit timestamp is not later than edit timestamp."""
-        edit_time = "2024-01-01T13:00:00+00:00"
-        audit_time = "2024-01-01T12:00:00+00:00"
-        
-        self.manager.record_edit("test.py", edit_time)
-        self.manager.record_audit(["test.py"], audit_time)
+        # Directly manipulate logs to test edge case where audit is earlier
+        self.manager.edit_log["test.py"] = "2024-01-01T13:00:00+00:00"
+        self.manager.audit_log["test.py"] = "2024-01-01T12:00:00+00:00"
         
         self.assertFalse(self.manager.is_task_complete())
     
     def test_is_task_complete_with_same_timestamp(self):
         """Should return False when audit and edit timestamps are the same."""
+        # Directly manipulate logs to test edge case where timestamps are equal
         timestamp = "2024-01-01T12:00:00+00:00"
-        
-        self.manager.record_edit("test.py", timestamp)
-        self.manager.record_audit(["test.py"], timestamp)
+        self.manager.edit_log["test.py"] = timestamp
+        self.manager.audit_log["test.py"] = timestamp
         
         self.assertFalse(self.manager.is_task_complete())
     
     def test_is_task_complete_with_multiple_files(self):
         """Should check all files for task completion."""
-        edit_time = "2024-01-01T12:00:00+00:00"
-        audit_time = "2024-01-01T13:00:00+00:00"
+        import time
         
-        self.manager.record_edit("test1.py", edit_time)
-        self.manager.record_edit("test2.py", edit_time)
-        self.manager.record_audit(["test1.py"], audit_time)
+        self.manager.record_edit("test1.py")
+        self.manager.record_edit("test2.py")
+        time.sleep(0.01)
+        self.manager.record_audit(["test1.py"])
         
         # One file unaudited
         self.assertFalse(self.manager.is_task_complete())
         
         # All files audited
-        self.manager.record_audit(["test2.py"], audit_time)
+        self.manager.record_audit(["test2.py"])
         self.assertTrue(self.manager.is_task_complete())
     
     def test_get_unaudited_files(self):
         """Should return list of files that need auditing."""
-        edit_time = "2024-01-01T12:00:00+00:00"
-        audit_time = "2024-01-01T13:00:00+00:00"
+        import time
         
-        self.manager.record_edit("test1.py", edit_time)
-        self.manager.record_edit("test2.py", edit_time)
-        self.manager.record_audit(["test1.py"], audit_time)
+        self.manager.record_edit("test1.py")
+        self.manager.record_edit("test2.py")
+        time.sleep(0.01)
+        self.manager.record_audit(["test1.py"])
         
         unaudited = self.manager.get_unaudited_files()
         self.assertEqual(len(unaudited), 1)
@@ -147,23 +133,21 @@ class TestAuditLogManager(unittest.TestCase):
     
     def test_get_unaudited_files_with_early_audit(self):
         """Should include files where audit timestamp is not later than edit."""
-        edit_time = "2024-01-01T13:00:00+00:00"
-        early_audit_time = "2024-01-01T12:00:00+00:00"
-        
-        self.manager.record_edit("test.py", edit_time)
-        self.manager.record_audit(["test.py"], early_audit_time)
+        # Directly manipulate logs to test edge case
+        self.manager.edit_log["test.py"] = "2024-01-01T13:00:00+00:00"
+        self.manager.audit_log["test.py"] = "2024-01-01T12:00:00+00:00"
         
         unaudited = self.manager.get_unaudited_files()
         self.assertIn("test.py", unaudited)
     
     def test_get_status(self):
         """Should return comprehensive status information."""
-        edit_time = "2024-01-01T12:00:00+00:00"
-        audit_time = "2024-01-01T13:00:00+00:00"
+        import time
         
-        self.manager.record_edit("test1.py", edit_time)
-        self.manager.record_edit("test2.py", edit_time)
-        self.manager.record_audit(["test1.py"], audit_time)
+        self.manager.record_edit("test1.py")
+        self.manager.record_edit("test2.py")
+        time.sleep(0.01)
+        self.manager.record_audit(["test1.py"])
         
         status = self.manager.get_status()
         
@@ -177,9 +161,8 @@ class TestAuditLogManager(unittest.TestCase):
     def test_load_existing_logs(self):
         """Should load existing logs from disk on initialization."""
         # Create logs
-        edit_time = "2024-01-01T12:00:00+00:00"
-        self.manager.record_edit("test.py", edit_time)
-        self.manager.record_audit(["other.py"], edit_time)
+        self.manager.record_edit("test.py")
+        self.manager.record_audit(["other.py"])
         
         # Create new manager instance
         new_manager = AuditLogManager(working_dir=self.tmpdir)
@@ -190,14 +173,17 @@ class TestAuditLogManager(unittest.TestCase):
     
     def test_multiple_edits_updates_timestamp(self):
         """Should update timestamp when file is edited multiple times."""
-        early_time = "2024-01-01T12:00:00+00:00"
-        later_time = "2024-01-01T13:00:00+00:00"
+        self.manager.record_edit("test.py")
+        first_timestamp = self.manager.edit_log["test.py"]
         
-        self.manager.record_edit("test.py", early_time)
-        self.assertEqual(self.manager.edit_log["test.py"], early_time)
+        import time
+        time.sleep(0.01)
         
-        self.manager.record_edit("test.py", later_time)
-        self.assertEqual(self.manager.edit_log["test.py"], later_time)
+        self.manager.record_edit("test.py")
+        second_timestamp = self.manager.edit_log["test.py"]
+        
+        self.assertNotEqual(first_timestamp, second_timestamp)
+        self.assertGreater(second_timestamp, first_timestamp)
 
 
 if __name__ == '__main__':

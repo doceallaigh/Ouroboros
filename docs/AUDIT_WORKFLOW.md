@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Ouroboros framework now includes a comprehensive audit workflow that tracks file edits and audits. This replaces the simple `confirm_task_complete` flow with a more robust `record_audit_success` workflow.
+The Ouroboros framework includes a comprehensive audit workflow that tracks file edits and audits using the `record_audit_success` workflow.
 
 ## Key Components
 
@@ -114,16 +114,11 @@ The auditor role now includes both tools:
       "get_file_info",
       "run_python",
       "raise_callback",
-      "confirm_task_complete",  // Legacy support
-      "record_audit_success"     // New workflow
+      "record_audit_success"
     ]
   }
 }
 ```
-
-## Backward Compatibility
-
-The original `confirm_task_complete()` function is still available for backward compatibility. However, new audits should use `record_audit_success()` to take advantage of the timestamp-based tracking.
 
 ## Implementation Details
 

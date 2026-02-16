@@ -81,31 +81,27 @@ class AuditLogManager:
         except IOError as e:
             logger.error(f"Failed to save audit_log: {e}")
     
-    def record_edit(self, file_path: str, timestamp: Optional[str] = None):
+    def record_edit(self, file_path: str):
         """
         Record that a file was edited, deleted, or otherwise changed.
         
         Args:
             file_path: Path to the file that was edited
-            timestamp: ISO 8601 timestamp (defaults to current time)
         """
-        if timestamp is None:
-            timestamp = datetime.now(timezone.utc).isoformat()
+        timestamp = datetime.now(timezone.utc).isoformat()
         
         self.edit_log[file_path] = timestamp
         self._save_edit_log()
         logger.info(f"Recorded edit for {file_path} at {timestamp}")
     
-    def record_audit(self, file_paths: List[str], timestamp: Optional[str] = None):
+    def record_audit(self, file_paths: List[str]):
         """
         Record that files have been audited.
         
         Args:
             file_paths: List of file paths that were audited
-            timestamp: ISO 8601 timestamp (defaults to current time)
         """
-        if timestamp is None:
-            timestamp = datetime.now(timezone.utc).isoformat()
+        timestamp = datetime.now(timezone.utc).isoformat()
         
         for file_path in file_paths:
             self.audit_log[file_path] = timestamp

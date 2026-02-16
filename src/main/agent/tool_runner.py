@@ -2007,10 +2007,8 @@ class ToolEnvironment:
         # ---- record_audit_success ------------------------------------------
         def _record_audit(file_paths, summary=""):
             """Record successful audit of files."""
-            timestamp = datetime.now(timezone.utc).isoformat()
-            
             # Record audit in the audit log manager
-            self.audit_log_manager.record_audit(file_paths, timestamp)
+            self.audit_log_manager.record_audit(file_paths)
             
             # Check if task is complete
             task_complete = self.audit_log_manager.is_task_complete()
@@ -2020,7 +2018,7 @@ class ToolEnvironment:
                 "status": "audit_recorded",
                 "audited_files": file_paths,
                 "summary": summary,
-                "timestamp": timestamp,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "task_complete": task_complete,
             }
             
@@ -2028,8 +2026,9 @@ class ToolEnvironment:
                 self.task_complete = True
                 result["message"] = "All edited files have been audited. Task is complete."
             else:
-                result["message"] = f"Audit recorded. {len(unaudited)} file(s) still need auditing."
+                result["message"] = f"Audit recorded. {len(unaudited)} file(s) still need auditing: {', '.join(unaudited)}"
                 result["unaudited_files"] = unaudited
+                result["action_required"] = f"Please audit the following files: {', '.join(unaudited)}"
             
             return result
 
